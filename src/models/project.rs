@@ -39,8 +39,10 @@ impl ProjectStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: Uuid,
+    pub idea: String,
     pub name: String,
-    pub repository_url: String,
+    pub repository_url: Option<String>,
+    pub project_path: String,
     pub status: ProjectStatus,
     pub tasks: Vec<Task>,
     pub issues: Vec<Issue>,
@@ -53,12 +55,18 @@ pub struct Project {
 
 impl Project {
     /// Create a new project
-    pub fn new(name: impl Into<String>, repository_url: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        idea: impl Into<String>,
+        project_path: impl Into<String>,
+    ) -> Self {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
+            idea: idea.into(),
             name: name.into(),
-            repository_url: repository_url.into(),
+            repository_url: None,
+            project_path: project_path.into(),
             status: ProjectStatus::default(),
             tasks: Vec::new(),
             issues: Vec::new(),
@@ -68,6 +76,12 @@ impl Project {
             updated_at: now,
             dependencies_urls: None,
         }
+    }
+
+    /// Set the repository URL for the project
+    pub fn set_repository_url(&mut self, repository_url: impl Into<String>) {
+        self.repository_url = Some(repository_url.into());
+        self.updated_at = Utc::now();
     }
 
     /// Transition project to a new status
@@ -1261,6 +1275,10 @@ mod tests {
     use super::*;
     use crate::enums::Priority;
 
+    fn create_test_project(name: &str) -> Project {
+        Project::new(name, "Test project idea", "/test/project/path")
+    }
+
     fn create_test_task(title: &str, depends_on: Vec<Uuid>) -> Task {
         let mut task = Task::new(title, "Test description", Priority::Medium);
         task.depends_on = depends_on;
@@ -1269,16 +1287,22 @@ mod tests {
 
     #[test]
     fn test_project_creation() {
-        let project = Project::new("Test Project", "https://github.com/test/repo");
+        let mut project = Project::new("Test Project", "A test project idea", "/path/to/project");
         assert_eq!(project.name, "Test Project");
-        assert_eq!(project.repository_url, "https://github.com/test/repo");
+        assert_eq!(project.idea, "A test project idea");
+        assert_eq!(project.project_path, "/path/to/project");
+        assert_eq!(project.repository_url, None);
         assert_eq!(project.status, ProjectStatus::Planning);
         assert!(project.tasks.is_empty());
+
+        // Test setting repository URL
+        project.set_repository_url("https://github.com/test/repo");
+        assert_eq!(project.repository_url, Some("https://github.com/test/repo".to_string()));
     }
 
     #[test]
     fn test_project_status_transitions() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Planning -> Active
         assert!(project.transition_to(ProjectStatus::Active).is_ok());
@@ -1303,7 +1327,7 @@ mod tests {
 
     #[test]
     fn test_invalid_project_transitions() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Cannot go from Planning to Completed
         assert!(project.transition_to(ProjectStatus::Completed).is_err());
@@ -1316,7 +1340,7 @@ mod tests {
 
     #[test]
     fn test_independent_tasks() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let task1 = create_test_task("Task 1", vec![]);
@@ -1334,7 +1358,7 @@ mod tests {
 
     #[test]
     fn test_task_dependencies() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let task1 = create_test_task("Task 1", vec![]);
@@ -1370,7 +1394,7 @@ mod tests {
 
     #[test]
     fn test_circular_dependency_detection() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let task1 = create_test_task("Task 1", vec![]);
         let task1_id = task1.id;
@@ -1386,7 +1410,7 @@ mod tests {
 
     #[test]
     fn test_execution_order() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let task1 = create_test_task("Task 1", vec![]);
         let task1_id = task1.id;
@@ -1413,7 +1437,7 @@ mod tests {
 
     #[test]
     fn test_task_removal_with_dependents() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let task1 = create_test_task("Task 1", vec![]);
         let task1_id = task1.id;
@@ -1428,7 +1452,7 @@ mod tests {
 
     #[test]
     fn test_completion_percentage() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let task1 = create_test_task("Task 1", vec![]);
         let task1_id = task1.id;
@@ -1448,7 +1472,7 @@ mod tests {
 
     #[test]
     fn test_auto_status_update() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let task1 = create_test_task("Task 1", vec![]);
         let task1_id = task1.id;
@@ -1470,7 +1494,7 @@ mod tests {
 
     #[test]
     fn test_project_statistics() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let task1 = create_test_task("Task 1", vec![]);
@@ -1490,7 +1514,7 @@ mod tests {
 
     #[test]
     fn test_missing_dependency_validation() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let non_existent_id = Uuid::new_v4();
         let task = create_test_task("Task 1", vec![non_existent_id]);
@@ -1511,7 +1535,7 @@ mod tests {
 
     #[test]
     fn test_add_remove_issues() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let issue = create_test_issue("Test Issue");
         let issue_id = issue.id;
@@ -1529,7 +1553,7 @@ mod tests {
 
     #[test]
     fn test_duplicate_issue_prevention() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let issue1 = create_test_issue("Issue 1");
         let mut issue2 = create_test_issue("Issue 2");
@@ -1551,7 +1575,7 @@ mod tests {
 
     #[test]
     fn test_add_remove_agents() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let agent = create_test_agent("Test Agent");
         let agent_id = agent.id;
@@ -1569,7 +1593,7 @@ mod tests {
 
     #[test]
     fn test_agent_removal_with_assigned_tasks() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let agent = create_test_agent("Test Agent");
@@ -1589,7 +1613,7 @@ mod tests {
 
     #[test]
     fn test_task_assignment() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let agent = create_test_agent("Test Agent");
@@ -1615,7 +1639,7 @@ mod tests {
 
     #[test]
     fn test_task_assignment_validation() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let agent = create_test_agent("Test Agent");
@@ -1646,7 +1670,7 @@ mod tests {
 
     #[test]
     fn test_task_unassignment_and_reassignment() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let agent1 = create_test_agent("Agent 1");
@@ -1674,7 +1698,7 @@ mod tests {
 
     #[test]
     fn test_auto_assignment() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let agent1 = create_test_agent("Agent 1");
@@ -1706,7 +1730,7 @@ mod tests {
 
     #[test]
     fn test_dependency_url_management() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Add URLs
         assert!(
@@ -1740,7 +1764,7 @@ mod tests {
 
     #[test]
     fn test_dependency_url_validation() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Invalid URL format
         assert!(project.add_dependency_url("invalid-url").is_err());
@@ -1753,7 +1777,7 @@ mod tests {
 
     #[test]
     fn test_update_dependency_urls() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let urls = vec![
             "https://example.com/dep1".to_string(),
@@ -1784,7 +1808,7 @@ mod tests {
 
     #[test]
     fn test_workload_distribution() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let agent1 = create_test_agent("Agent 1");
@@ -1821,7 +1845,7 @@ mod tests {
 
     #[test]
     fn test_health_score() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         // Empty project should have perfect health
@@ -1851,7 +1875,7 @@ mod tests {
 
     #[test]
     fn test_enhanced_statistics() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         // Add agents
@@ -1898,7 +1922,7 @@ mod tests {
 
     #[test]
     fn test_project_comment_management() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         // Add task with comments
@@ -1932,7 +1956,7 @@ mod tests {
 
     #[test]
     fn test_project_comment_statistics() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Add task with mixed sync status comments
         let mut task = create_test_task("Task 1", vec![]);
@@ -1951,7 +1975,7 @@ mod tests {
 
     #[test]
     fn test_project_mark_all_comments_synced() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Add task and issue with unsynced comments
         let mut task = create_test_task("Task 1", vec![]);
@@ -1974,7 +1998,7 @@ mod tests {
 
     #[test]
     fn test_project_find_and_update_comment() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let mut task = create_test_task("Task 1", vec![]);
         task.add_comment("user1", "Original content");
@@ -2001,7 +2025,7 @@ mod tests {
 
     #[test]
     fn test_issue_sync_management() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Add issues
         let issue1 = create_test_issue("Issue 1");
@@ -2025,7 +2049,7 @@ mod tests {
 
     #[test]
     fn test_issue_modification_unsyncs() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let mut issue = create_test_issue("Test Issue");
         issue.mark_synced(); // Start as synced
@@ -2063,7 +2087,7 @@ mod tests {
 
     #[test]
     fn test_issue_status_change_unsyncs() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         let mut issue = create_test_issue("Test Issue");
         issue.mark_synced();
@@ -2086,7 +2110,7 @@ mod tests {
 
     #[test]
     fn test_project_statistics_with_issue_sync() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Add synced and unsynced issues
         let mut issue1 = create_test_issue("Synced Issue");
@@ -2103,7 +2127,7 @@ mod tests {
 
     #[test]
     fn test_project_mark_all_synced() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
 
         // Add unsynced issue and task with comments
         let mut issue = create_test_issue("Unsynced Issue");
@@ -2130,7 +2154,7 @@ mod tests {
 
     #[test]
     fn test_project_pull_request_management() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         // Create task with pull request
@@ -2160,7 +2184,7 @@ mod tests {
 
     #[test]
     fn test_project_statistics_with_pull_requests() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         // Create task with pull request
@@ -2182,7 +2206,7 @@ mod tests {
 
     #[test]
     fn test_project_mark_all_synced_with_prs() {
-        let mut project = Project::new("Test", "https://github.com/test");
+        let mut project = create_test_project("Test");
         project.transition_to(ProjectStatus::Active).unwrap();
 
         // Create task with pull request and comments
