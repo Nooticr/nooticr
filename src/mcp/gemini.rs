@@ -24,6 +24,7 @@ impl GeminiCLI {
         let output = Command::new("gemini")
             .arg("--version")
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to get Gemini version: {}", e)))?;
 
         if !output.status.success() {
@@ -54,6 +55,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -94,6 +96,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -130,6 +133,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -154,6 +158,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -178,6 +183,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -203,6 +209,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -227,6 +234,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -251,6 +259,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {
@@ -334,6 +343,7 @@ impl GeminiCLI {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
+            .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
 
         if !output.status.success() {

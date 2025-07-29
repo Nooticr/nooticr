@@ -100,7 +100,7 @@ impl Task {
         // Update status and history
         let now = Utc::now();
         self.status = new_status.clone();
-        self.status_history.push((new_status, now));
+        self.status_history.push((new_status.clone(), now));
         self.updated_at = Some(now);
         
         // Handle completion
@@ -164,6 +164,7 @@ impl Task {
             author: author.into(),
             content: content.into(),
             created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         self.comments.push(comment);
         self.updated_at = Some(Utc::now());
@@ -215,7 +216,7 @@ impl Task {
             status: self.status.clone(),
             code_status: self.code_status,
             assigned_to: self.assigned_to.clone(),
-            priority: self.priority,
+            priority: self.priority.clone(),
             is_overdue: self.is_overdue(),
             ci_attemps: self.ci_attemps,
             comment_count: self.comments.len(),

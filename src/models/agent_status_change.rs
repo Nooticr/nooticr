@@ -2,10 +2,7 @@
 
 
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::str::FromStr;
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use crate::enums::agent_status::AgentStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

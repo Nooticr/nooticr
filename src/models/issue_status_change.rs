@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use crate::enums::issue_status::IssueStatus;
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
