@@ -21,6 +21,12 @@ impl Action {
         match self {
             Action::Write { path, content } => {
                 let file_path = PathBuf::from(path);
+
+                // Create parent directories if they don't exist
+                if let Some(parent) = file_path.parent() {
+                    fs::create_dir_all(parent).await?;
+                }
+
                 let mut file = fs::File::create(&file_path).await?;
                 file.write_all(content.as_bytes()).await?;
                 debug!("Wrote to {}: {}", path, content);
@@ -278,11 +284,6 @@ mod tests {
     async fn test_write_action_creates_directories() {
         let temp_dir = tempdir().expect("Failed to create temp directory");
         let nested_path = temp_dir.path().join("nested").join("directory").join("test.txt");
-
-        // Create parent directories first
-        if let Some(parent) = nested_path.parent() {
-            fs::create_dir_all(parent).await.expect("Should create parent directories");
-        }
 
         let action = Action::Write {
             path: nested_path.to_string_lossy().to_string(),
