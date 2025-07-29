@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use crate::models::comment::Comment;
-use crate::enums::{TaskStatus, CodeStatus, Priority};
+use crate::enums::{TaskStatus, CodeStatus, Priority, CommentType};
 use crate::error::{Result, OrchestratorError};
 use super::agent::Agent;
 
@@ -160,15 +160,97 @@ impl Task {
     
     /// Add a comment to the task
     pub fn add_comment(&mut self, author: impl Into<String>, content: impl Into<String>) {
-        let comment = Comment {
-            id: Uuid::new_v4(),
-            author: author.into(),
-            content: content.into(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let comment = Comment::new(author, content, CommentType::Task);
         self.comments.push(comment);
         self.updated_at = Some(Utc::now());
+    }
+
+    /// Add a comment to the task with sync status
+    pub fn add_comment_with_sync(&mut self, author: impl Into<String>, content: impl Into<String>, synced: bool) {
+        let comment = Comment::new_with_sync(author, content, CommentType::Task, synced);
+        self.comments.push(comment);
+        self.updated_at = Some(Utc::now());
+    }
+
+    /// Get all unsynced comments
+    pub fn get_unsynced_comments(&self) -> Vec<&Comment> {
+        self.comments.iter().filter(|c| c.needs_sync()).collect()
+    }
+
+    /// Mark all comments as synced
+    pub fn mark_all_comments_synced(&mut self) {
+        for comment in &mut self.comments {
+            comment.mark_synced();
+        }
+        self.updated_at = Some(Utc::now());
+    }
+
+    /// Get comment by ID
+    pub fn get_comment(&self, comment_id: Uuid) -> Option<&Comment> {
+        self.comments.iter().find(|c| c.id == comment_id)
+    }
+
+    /// Get mutable comment by ID
+    pub fn get_comment_mut(&mut self, comment_id: Uuid) -> Option<&mut Comment> {
+        self.comments.iter_mut().find(|c| c.id == comment_id)
+    }
+
+    /// Update a comment's content
+    pub fn update_comment(&mut self, comment_id: Uuid, new_content: impl Into<String>) -> Result<()> {
+        let comment = self.get_comment_mut(comment_id)
+            .ok_or_else(|| OrchestratorError::validation("Comment not found"))?;
+
+        comment.update_content(new_content);
+        self.updated_at = Some(Utc::now());
+        Ok(())
+    }
+
+    /// Remove a comment
+    pub fn remove_comment(&mut self, comment_id: Uuid) -> Result<Comment> {
+        let position = self.comments.iter().position(|c| c.id == comment_id)
+            .ok_or_else(|| OrchestratorError::validation("Comment not found"))?;
+
+        let removed_comment = self.comments.remove(position);
+        self.updated_at = Some(Utc::now());
+        Ok(removed_comment)
+    }
+
+    /// Add a pull request comment (only when task is in PullRequest status)
+    pub fn add_pr_comment(&mut self, author: impl Into<String>, content: impl Into<String>) -> Result<()> {
+        if self.code_status != CodeStatus::PullRequest {
+            return Err(OrchestratorError::validation(
+                "Can only add PR comments when task is in PullRequest status"
+            ));
+        }
+
+        let comment = Comment::new(author, content, CommentType::PullRequest);
+        self.comments.push(comment);
+        self.updated_at = Some(Utc::now());
+        Ok(())
+    }
+
+    /// Add a pull request comment with sync status
+    pub fn add_pr_comment_with_sync(&mut self, author: impl Into<String>, content: impl Into<String>, synced: bool) -> Result<()> {
+        if self.code_status != CodeStatus::PullRequest {
+            return Err(OrchestratorError::validation(
+                "Can only add PR comments when task is in PullRequest status"
+            ));
+        }
+
+        let comment = Comment::new_with_sync(author, content, CommentType::PullRequest, synced);
+        self.comments.push(comment);
+        self.updated_at = Some(Utc::now());
+        Ok(())
+    }
+
+    /// Get all pull request comments
+    pub fn get_pr_comments(&self) -> Vec<&Comment> {
+        self.comments.iter().filter(|c| c.comment_type == CommentType::PullRequest).collect()
+    }
+
+    /// Get comments by type
+    pub fn get_comments_by_type(&self, comment_type: CommentType) -> Vec<&Comment> {
+        self.comments.iter().filter(|c| c.comment_type == comment_type).collect()
     }
     
     /// Assign task to an agent
@@ -242,5 +324,94 @@ impl Task {
             ci_attemps: self.ci_attemps,
             comment_count: self.comments.len(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_task_comment_management() {
+        let mut task = Task::new("Test Task", "Description", Priority::Medium);
+
+        // Add regular comment
+        task.add_comment("user1", "Regular comment");
+        assert_eq!(task.comments.len(), 1);
+        assert_eq!(task.comments[0].comment_type, CommentType::Task);
+        assert!(task.comments[0].needs_sync());
+
+        // Add synced comment
+        task.add_comment_with_sync("user2", "Synced comment", true);
+        assert_eq!(task.comments.len(), 2);
+        assert!(!task.comments[1].needs_sync());
+
+        // Test unsynced comments
+        let unsynced = task.get_unsynced_comments();
+        assert_eq!(unsynced.len(), 1);
+
+        // Mark all as synced
+        task.mark_all_comments_synced();
+        assert_eq!(task.get_unsynced_comments().len(), 0);
+    }
+
+    #[test]
+    fn test_task_pr_comments() {
+        let mut task = Task::new("Test Task", "Description", Priority::Medium);
+
+        // Should fail to add PR comment when not in PR status
+        assert!(task.add_pr_comment("user1", "PR comment").is_err());
+
+        // Assign task to an agent first
+        use crate::models::agent::Agent;
+        let agent = Agent::new("Test Agent", std::path::PathBuf::from("/tmp/test.json"), "Test agent");
+        task.assigned_to = Some(agent);
+
+        // Transition task to InProgress first, then to coded, then to PR status
+        task.transition_task_status(TaskStatus::InProgress).unwrap();
+        task.transition_code_status(CodeStatus::Coded).unwrap();
+        task.transition_code_status(CodeStatus::PullRequest).unwrap();
+
+        // Now should be able to add PR comment
+        assert!(task.add_pr_comment("user1", "PR comment").is_ok());
+        assert_eq!(task.comments.len(), 1);
+        assert_eq!(task.comments[0].comment_type, CommentType::PullRequest);
+
+        // Add synced PR comment
+        assert!(task.add_pr_comment_with_sync("user2", "Synced PR comment", true).is_ok());
+        assert_eq!(task.comments.len(), 2);
+
+        // Test PR comment retrieval
+        let pr_comments = task.get_pr_comments();
+        assert_eq!(pr_comments.len(), 2);
+
+        let task_comments = task.get_comments_by_type(CommentType::Task);
+        assert_eq!(task_comments.len(), 0);
+    }
+
+    #[test]
+    fn test_task_comment_operations() {
+        let mut task = Task::new("Test Task", "Description", Priority::Medium);
+
+        task.add_comment("user1", "Original comment");
+        let comment_id = task.comments[0].id;
+
+        // Test comment retrieval
+        assert!(task.get_comment(comment_id).is_some());
+        assert!(task.get_comment_mut(comment_id).is_some());
+
+        // Test comment update
+        assert!(task.update_comment(comment_id, "Updated comment").is_ok());
+        assert_eq!(task.get_comment(comment_id).unwrap().content, "Updated comment");
+
+        // Test comment removal
+        let removed = task.remove_comment(comment_id).unwrap();
+        assert_eq!(removed.content, "Updated comment");
+        assert_eq!(task.comments.len(), 0);
+
+        // Test operations on non-existent comment
+        let fake_id = Uuid::new_v4();
+        assert!(task.update_comment(fake_id, "test").is_err());
+        assert!(task.remove_comment(fake_id).is_err());
     }
 }

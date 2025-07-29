@@ -4,7 +4,8 @@ use super::task::Task;
 use chrono::{DateTime, Utc};
 use super::issue::Issue;
 use super::agent::Agent;
-use crate::enums::TaskStatus;
+use crate::models::comment::Comment;
+use crate::enums::{TaskStatus, CommentType};
 use crate::error::{Result, OrchestratorError};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -877,6 +878,124 @@ impl Project {
 
         score.max(0.0).min(100.0)
     }
+
+    // ===== COMMENT MANAGEMENT =====
+
+    /// Get all comments from all tasks and issues
+    pub fn get_all_comments(&self) -> Vec<&Comment> {
+        let mut comments = Vec::new();
+
+        // Collect task comments
+        for task in &self.tasks {
+            comments.extend(task.comments.iter());
+        }
+
+        // Collect issue comments
+        for issue in &self.issues {
+            comments.extend(issue.comments.iter());
+        }
+
+        comments
+    }
+
+    /// Get all unsynced comments from tasks and issues
+    pub fn get_all_unsynced_comments(&self) -> Vec<&Comment> {
+        self.get_all_comments()
+            .into_iter()
+            .filter(|c| c.needs_sync())
+            .collect()
+    }
+
+    /// Get comments by type
+    pub fn get_comments_by_type(&self, comment_type: CommentType) -> Vec<&Comment> {
+        self.get_all_comments()
+            .into_iter()
+            .filter(|c| c.comment_type == comment_type)
+            .collect()
+    }
+
+    /// Get comments by author
+    pub fn get_comments_by_author(&self, author: &str) -> Vec<&Comment> {
+        self.get_all_comments()
+            .into_iter()
+            .filter(|c| c.author == author)
+            .collect()
+    }
+
+    /// Mark all comments as synced across the entire project
+    pub fn mark_all_comments_synced(&mut self) {
+        for task in &mut self.tasks {
+            task.mark_all_comments_synced();
+        }
+
+        for issue in &mut self.issues {
+            issue.mark_all_comments_synced();
+        }
+
+        self.updated_at = Utc::now();
+    }
+
+    /// Get comment statistics
+    pub fn get_comment_statistics(&self) -> CommentStatistics {
+        let all_comments = self.get_all_comments();
+        let total_comments = all_comments.len();
+        let unsynced_comments = all_comments.iter().filter(|c| c.needs_sync()).count();
+
+        let task_comments = all_comments.iter().filter(|c| c.comment_type == CommentType::Task).count();
+        let issue_comments = all_comments.iter().filter(|c| c.comment_type == CommentType::Issue).count();
+        let pr_comments = all_comments.iter().filter(|c| c.comment_type == CommentType::PullRequest).count();
+
+        CommentStatistics {
+            total_comments,
+            unsynced_comments,
+            task_comments,
+            issue_comments,
+            pr_comments,
+            sync_percentage: if total_comments > 0 {
+                ((total_comments - unsynced_comments) as f64 / total_comments as f64) * 100.0
+            } else {
+                100.0
+            },
+        }
+    }
+
+    /// Find comment by ID across all tasks and issues
+    pub fn find_comment(&self, comment_id: Uuid) -> Option<(&Comment, CommentLocation)> {
+        // Search in tasks
+        for (task_index, task) in self.tasks.iter().enumerate() {
+            if let Some(comment) = task.get_comment(comment_id) {
+                return Some((comment, CommentLocation::Task(task_index, task.id)));
+            }
+        }
+
+        // Search in issues
+        for (issue_index, issue) in self.issues.iter().enumerate() {
+            if let Some(comment) = issue.get_comment(comment_id) {
+                return Some((comment, CommentLocation::Issue(issue_index, issue.id)));
+            }
+        }
+
+        None
+    }
+
+    /// Update a comment anywhere in the project
+    pub fn update_comment_anywhere(&mut self, comment_id: Uuid, new_content: impl Into<String>) -> Result<()> {
+        // Try to find and update in tasks
+        for task in &mut self.tasks {
+            if task.get_comment(comment_id).is_some() {
+                return task.update_comment(comment_id, new_content);
+            }
+        }
+
+        // Try to find and update in issues
+        for issue in &mut self.issues {
+            if issue.get_comment(comment_id).is_some() {
+                return issue.update_comment(comment_id, new_content);
+            }
+        }
+
+        Err(OrchestratorError::validation("Comment not found in project"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -897,6 +1016,22 @@ pub struct ProjectStatistics {
     pub error_agents: usize,
     pub health_score: f64,
     pub dependency_urls_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentStatistics {
+    pub total_comments: usize,
+    pub unsynced_comments: usize,
+    pub task_comments: usize,
+    pub issue_comments: usize,
+    pub pr_comments: usize,
+    pub sync_percentage: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommentLocation {
+    Task(usize, Uuid), // (index, task_id)
+    Issue(usize, Uuid), // (index, issue_id)
 }
 
 #[cfg(test)]
@@ -1511,5 +1646,106 @@ mod tests {
         assert_eq!(stats.total_issues, 1);
         assert_eq!(stats.dependency_urls_count, 2);
         assert!(stats.health_score > 0.0);
+    }
+
+    // ===== COMMENT MANAGEMENT TESTS =====
+
+    #[test]
+    fn test_project_comment_management() {
+        let mut project = Project::new("Test", "https://github.com/test");
+        project.transition_to(ProjectStatus::Active).unwrap();
+
+        // Add task with comments
+        let mut task = create_test_task("Task 1", vec![]);
+        task.add_comment("user1", "Task comment 1");
+        task.add_comment_with_sync("user2", "Task comment 2", true);
+        project.add_task(task).unwrap();
+
+        // Add issue with comments
+        let mut issue = create_test_issue("Issue 1");
+        issue.add_new_comment("user3", "Issue comment 1");
+        issue.add_new_comment_with_sync("user4", "Issue comment 2", true);
+        project.add_issue(issue).unwrap();
+
+        // Test comment retrieval
+        let all_comments = project.get_all_comments();
+        assert_eq!(all_comments.len(), 4);
+
+        let unsynced_comments = project.get_all_unsynced_comments();
+        assert_eq!(unsynced_comments.len(), 2);
+
+        let task_comments = project.get_comments_by_type(CommentType::Task);
+        assert_eq!(task_comments.len(), 2);
+
+        let issue_comments = project.get_comments_by_type(CommentType::Issue);
+        assert_eq!(issue_comments.len(), 2);
+
+        let user1_comments = project.get_comments_by_author("user1");
+        assert_eq!(user1_comments.len(), 1);
+    }
+
+    #[test]
+    fn test_project_comment_statistics() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        // Add task with mixed sync status comments
+        let mut task = create_test_task("Task 1", vec![]);
+        task.add_comment("user1", "Unsynced comment");
+        task.add_comment_with_sync("user2", "Synced comment", true);
+        project.add_task(task).unwrap();
+
+        let stats = project.get_comment_statistics();
+        assert_eq!(stats.total_comments, 2);
+        assert_eq!(stats.unsynced_comments, 1);
+        assert_eq!(stats.task_comments, 2);
+        assert_eq!(stats.issue_comments, 0);
+        assert_eq!(stats.pr_comments, 0);
+        assert_eq!(stats.sync_percentage, 50.0);
+    }
+
+    #[test]
+    fn test_project_mark_all_comments_synced() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        // Add task and issue with unsynced comments
+        let mut task = create_test_task("Task 1", vec![]);
+        task.add_comment("user1", "Task comment");
+        project.add_task(task).unwrap();
+
+        let mut issue = create_test_issue("Issue 1");
+        issue.add_new_comment("user2", "Issue comment");
+        project.add_issue(issue).unwrap();
+
+        // Initially all comments should be unsynced
+        assert_eq!(project.get_all_unsynced_comments().len(), 2);
+
+        // Mark all as synced
+        project.mark_all_comments_synced();
+
+        // Now no comments should be unsynced
+        assert_eq!(project.get_all_unsynced_comments().len(), 0);
+    }
+
+    #[test]
+    fn test_project_find_and_update_comment() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        let mut task = create_test_task("Task 1", vec![]);
+        task.add_comment("user1", "Original content");
+        let comment_id = task.comments[0].id;
+        project.add_task(task).unwrap();
+
+        // Find comment
+        let (comment, location) = project.find_comment(comment_id).unwrap();
+        assert_eq!(comment.content, "Original content");
+        assert!(matches!(location, CommentLocation::Task(_, _)));
+
+        // Update comment
+        project.update_comment_anywhere(comment_id, "Updated content").unwrap();
+
+        // Verify update
+        let (updated_comment, _) = project.find_comment(comment_id).unwrap();
+        assert_eq!(updated_comment.content, "Updated content");
+        assert!(updated_comment.needs_sync()); // Should be marked as unsynced
     }
 }

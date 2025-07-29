@@ -1,4 +1,4 @@
-use crate::enums::{IssueStatus, IssueType};
+use crate::enums::{IssueStatus, IssueType, CommentType};
 use crate::models::task::Task;
 use chrono::{DateTime, Utc, TimeDelta};
 use serde::{Deserialize, Serialize};
@@ -221,6 +221,68 @@ impl Issue {
     pub fn add_comment(&mut self, comment: Comment) {
         self.comments.push(comment);
         self.updated_at = Utc::now();
+    }
+
+    /// Add a new comment to the issue
+    pub fn add_new_comment(&mut self, author: impl Into<String>, content: impl Into<String>) {
+        let comment = Comment::new(author, content, CommentType::Issue);
+        self.comments.push(comment);
+        self.updated_at = Utc::now();
+    }
+
+    /// Add a new comment to the issue with sync status
+    pub fn add_new_comment_with_sync(&mut self, author: impl Into<String>, content: impl Into<String>, synced: bool) {
+        let comment = Comment::new_with_sync(author, content, CommentType::Issue, synced);
+        self.comments.push(comment);
+        self.updated_at = Utc::now();
+    }
+
+    /// Get all unsynced comments
+    pub fn get_unsynced_comments(&self) -> Vec<&Comment> {
+        self.comments.iter().filter(|c| c.needs_sync()).collect()
+    }
+
+    /// Mark all comments as synced
+    pub fn mark_all_comments_synced(&mut self) {
+        for comment in &mut self.comments {
+            comment.mark_synced();
+        }
+        self.updated_at = Utc::now();
+    }
+
+    /// Get comment by ID
+    pub fn get_comment(&self, comment_id: Uuid) -> Option<&Comment> {
+        self.comments.iter().find(|c| c.id == comment_id)
+    }
+
+    /// Get mutable comment by ID
+    pub fn get_comment_mut(&mut self, comment_id: Uuid) -> Option<&mut Comment> {
+        self.comments.iter_mut().find(|c| c.id == comment_id)
+    }
+
+    /// Update a comment's content
+    pub fn update_comment(&mut self, comment_id: Uuid, new_content: impl Into<String>) -> Result<()> {
+        let comment = self.get_comment_mut(comment_id)
+            .ok_or_else(|| OrchestratorError::validation("Comment not found"))?;
+
+        comment.update_content(new_content);
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Remove a comment
+    pub fn remove_comment(&mut self, comment_id: Uuid) -> Result<Comment> {
+        let position = self.comments.iter().position(|c| c.id == comment_id)
+            .ok_or_else(|| OrchestratorError::validation("Comment not found"))?;
+
+        let removed_comment = self.comments.remove(position);
+        self.updated_at = Utc::now();
+        Ok(removed_comment)
+    }
+
+    /// Get comments by type
+    pub fn get_comments_by_type(&self, comment_type: CommentType) -> Vec<&Comment> {
+        self.comments.iter().filter(|c| c.comment_type == comment_type).collect()
     }
     
     /// Update GitHub issue number
