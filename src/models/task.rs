@@ -42,7 +42,7 @@ pub struct Task {
     pub tags: Vec<String>,
     pub comments: Vec<Comment>,
     pub ci_attemps: u32,
-    pub depends_on: Vec<Uuid>,
+    pub depends_on: Vec<Task>,
 }
 
 impl Task {
