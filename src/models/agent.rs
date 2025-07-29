@@ -110,14 +110,72 @@ impl Agent {
         }
     }
 
-    /// Load agents from the agents directory
-    pub async fn load_agents_from_directory(agents_dir: &str) -> Result<Vec<Agent>> {
+    /// Load agents from embedded data or directory
+    pub async fn load_agents_from_directory(_agents_dir: &str) -> Result<Vec<Agent>> {
+        // First try to load from embedded agent data
+        if let Ok(agents) = Self::load_embedded_agents() {
+            return Ok(agents);
+        }
+
+        // Fallback to loading from filesystem
+        Self::load_agents_from_filesystem().await
+    }
+
+    /// Load agents from embedded data (compiled into binary)
+    fn load_embedded_agents() -> Result<Vec<Agent>> {
+        let embedded_agents = vec![
+            ("backend_engineer_rust.md", include_str!("../../agents/backend_engineer_rust.md")),
+            ("backend_qa_rust.md", include_str!("../../agents/backend_qa_rust.md")),
+            ("codereview_eng.md", include_str!("../../agents/codereview_eng.md")),
+            ("devops.md", include_str!("../../agents/devops.md")),
+            ("frontend_engineer_react.md", include_str!("../../agents/frontend_engineer_react.md")),
+            ("frontend_engineer_vue.md", include_str!("../../agents/frontend_engineer_vue.md")),
+            ("frontend_qa_react.md", include_str!("../../agents/frontend_qa_react.md")),
+            ("frontend_qa_vue.md", include_str!("../../agents/frontend_qa_vue.md")),
+            ("performance_engineer.md", include_str!("../../agents/performance_engineer.md")),
+            ("release_mmanager.md", include_str!("../../agents/release_mmanager.md")),
+            ("security_engineer.md", include_str!("../../agents/security_engineer.md")),
+        ];
+
+        let mut agents = Vec::new();
+        for (filename, content) in embedded_agents {
+            let agent_type = Self::parse_agent_type_from_filename(filename);
+
+            // Extract name from filename (remove .md extension)
+            let name = filename.trim_end_matches(".md").replace('_', " ");
+            let name = name.split_whitespace()
+                .map(|word| {
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        None => String::new(),
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            // Parse YAML front matter to extract description
+            let description = Self::extract_description_from_content(content, &name);
+
+            let agent = Agent::new_with_type(
+                name,
+                std::path::PathBuf::from(format!("embedded://{}", filename)),
+                description,
+                agent_type
+            );
+            agents.push(agent);
+        }
+
+        Ok(agents)
+    }
+
+    /// Load agents from filesystem (fallback)
+    async fn load_agents_from_filesystem() -> Result<Vec<Agent>> {
         use std::fs;
         use std::path::Path;
 
         // Try multiple possible locations for the agents directory
         let possible_paths = vec![
-            Path::new(agents_dir).to_path_buf(),
             Path::new("./agents").to_path_buf(),
             Path::new("../agents").to_path_buf(),
             std::env::current_exe()
@@ -132,24 +190,17 @@ impl Agent {
         ];
 
         let mut agents_path = None;
-        for path in possible_paths {
+        for path in &possible_paths {
             if path.exists() && path.is_dir() {
-                agents_path = Some(path);
+                agents_path = Some(path.clone());
                 break;
             }
         }
 
         let agents_path = agents_path.ok_or_else(|| {
-            OrchestratorError::validation(format!(
-                "Agents directory not found. Tried: {:?}. Please ensure agents directory exists.",
-                vec![
-                    agents_dir,
-                    "./agents",
-                    "../agents",
-                    "~/.orchy/agents",
-                    "agents (relative to executable)"
-                ]
-            ))
+            OrchestratorError::validation(
+                "No agents directory found and embedded agents failed to load".to_string()
+            )
         })?;
 
         let mut agents = Vec::new();
@@ -250,6 +301,8 @@ impl Agent {
         // Final fallback: use the agent name
         fallback_name.to_string()
     }
+
+
 
     /// Transition the agent to a new status with validation
     pub fn transition_to(&mut self, new_status: AgentStatus, reason: Option<String>) -> Result<()> {
