@@ -44,14 +44,14 @@ impl Issue {
             labels: vec![
                 format!("priority:{:?}", task.priority).to_lowercase()
             ],
-            assignee: task.assigned_to.clone(),
+            assignee: task.assigned_to.as_ref().map(|agent| agent.name.clone()),
             branch_name: None,
             issue_type: None,
             status: initial_status.clone(),
             status_history: vec![StatusChange {
                 from: None,
                 to: initial_status,
-                changed_by: task.rapporter.clone().unwrap_or_else(|| "system".to_string()),
+                changed_by: task.rapporter.as_ref().map(|agent| agent.name.clone()).unwrap_or_else(|| "system".to_string()),
                 reason: Some("Issue created from task".to_string()),
                 timestamp: now,
             }],

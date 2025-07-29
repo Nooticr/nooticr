@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use crate::models::comment::Comment;
 use crate::enums::{TaskStatus, CodeStatus, Priority};
 use crate::error::{Result, OrchestratorError};
+use super::agent::Agent;
 
 
 
@@ -29,8 +30,8 @@ pub struct Task {
     pub status_history: Vec<(TaskStatus, chrono::DateTime<chrono::Utc>)>,
     pub code_status: CodeStatus,
     pub code_status_history: Vec<(CodeStatus, chrono::DateTime<chrono::Utc>)>,
-    pub rapporter: Option<String>,
-    pub assigned_to: Option<String>,
+    pub rapporter: Option<Agent>,
+    pub assigned_to: Option<Agent>,
     pub priority: Priority,
     pub estimated_complexity: Option<u8>, // 1-10 scale
     pub estimated_duration: Option<u32>, // in minutes
@@ -170,15 +171,35 @@ impl Task {
         self.updated_at = Some(Utc::now());
     }
     
-    /// Assign task to a user
-    pub fn assign_to(&mut self, user: impl Into<String>) -> Result<()> {
+    /// Assign task to an agent
+    pub fn assign_to(&mut self, agent: Agent) -> Result<()> {
         if self.status.is_terminal() {
             return Err(OrchestratorError::validation(
                 "Cannot assign completed or cancelled tasks"
             ));
         }
-        
-        self.assigned_to = Some(user.into());
+
+        self.assigned_to = Some(agent);
+        self.updated_at = Some(Utc::now());
+        Ok(())
+    }
+
+    /// Assign task to an agent by name (convenience method)
+    pub fn assign_to_by_name(&mut self, agent_name: impl Into<String>) -> Result<()> {
+        if self.status.is_terminal() {
+            return Err(OrchestratorError::validation(
+                "Cannot assign completed or cancelled tasks"
+            ));
+        }
+
+        // Create a minimal agent with just the name for assignment
+        let agent = Agent::new(
+            &agent_name.into(),
+            std::path::PathBuf::from("/tmp/placeholder.json"),
+            "Assigned agent"
+        );
+
+        self.assigned_to = Some(agent);
         self.updated_at = Some(Utc::now());
         Ok(())
     }
@@ -215,7 +236,7 @@ impl Task {
             title: self.title.clone(),
             status: self.status.clone(),
             code_status: self.code_status,
-            assigned_to: self.assigned_to.clone(),
+            assigned_to: self.assigned_to.as_ref().map(|agent| agent.name.clone()),
             priority: self.priority.clone(),
             is_overdue: self.is_overdue(),
             ci_attemps: self.ci_attemps,
