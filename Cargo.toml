@@ -1,0 +1,16 @@
+[package]
+name = "orchy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = { version = "0.4.41", features = ["serde"] }
+clap = "4.5.41"
+derive = "1.0.0"
+features = "0.10.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.141"
+thiserror = "2.0.12"
+tokio = { version = "1.47.0", features = ["full"] }
+tracing = "0.1.41"
+uuid = { version = "1.17.0", features = ["v4", "serde"] }
