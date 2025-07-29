@@ -18,6 +18,7 @@ pub struct TaskInput {
     pub description: String,
     pub priority: String, // "High/Medium/Low/Critical" - will be parsed to Priority enum
     pub complexity: u8, // 1-10 scale
+    pub agent_type: Option<String>,
     pub tags: Vec<String>,
     pub depends_on: Vec<String>, // Task IDs that will be mapped to UUIDs
 }

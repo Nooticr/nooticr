@@ -311,10 +311,11 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
     // Project info
     let project_info = if let Some(ref project) = app.current_project {
         format!(
-            "Current Project: {}\n\nDescription: {}\nPath: {}\nTasks: {}\nAgents: {}\nIssues: {}",
+            "Current Project: {}\n\nDescription: {}\nPath: {}\nTech Stack: {:?}\nTasks: {}\nAgents: {}\nIssues: {}",
             project.name,
             project.idea,
             project.project_path,
+            project.tech_stack,
             project.tasks.len(),
             project.agents.len(),
             project.issues.len()
@@ -410,10 +411,11 @@ fn render_agents(f: &mut Frame, area: Rect, app: &App) {
                 .enumerate()
                 .map(|(i, agent)| {
                     format!(
-                        "{}. {} [{}]\n   Description: {}\n   Created: {}\n",
+                        "{}. {} [{}]\n   Type: {:?}\n   Description: {}\n   Created: {}\n",
                         i + 1,
                         agent.name,
                         format_agent_status(&agent.status),
+                        agent.agent_type,
                         agent.description,
                         agent.created_at.format("%Y-%m-%d %H:%M:%S")
                     )

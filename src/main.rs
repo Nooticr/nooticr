@@ -110,6 +110,14 @@ fn build_cli() -> Command {
                         .help("Optional dependency URLs (comma-separated)")
                         .required(false)
                 )
+                .arg(
+                    Arg::new("tech-stack")
+                        .short('t')
+                        .long("tech-stack")
+                        .value_name("TECH_STACK")
+                        .help("Technology stack (rust, vue, react, fullstack-rust-vue, fullstack-rust-react)")
+                        .required(false)
+                )
         )
         .subcommand(
             Command::new("list-tasks")

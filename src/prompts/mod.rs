@@ -1,11 +1,13 @@
 pub struct Prompts {}
 
 impl Prompts {
-    pub fn idea_breakdown_user_prompt(idea: &str, context: &str) -> String {
+    pub fn idea_breakdown_user_prompt(idea: &str, context: &str, available_agents_types: Vec<String>, tech_stack: &str) -> String {
         format!(
             r#"Break down this software development idea into specific, well-structured tasks:
 
             IDEA: {}
+
+            TECHNOLOGY STACK: {}
 
             ADDITIONAL CONTEXT:
             {}
@@ -33,6 +35,8 @@ impl Prompts {
             Ensure each task has clear acceptance criteria and appropriate technology tags. return everythin in a json
             in this format (important)
 
+            please also assign an agent_type to each task based on the available agents types: {:?}
+
              ```
              [{{
                 "id": "unique_task_id",
@@ -40,12 +44,13 @@ impl Prompts {
                 "description": "Task description",
                 "priority": "High/Medium/Low/Critical",
                 "complexity": 1-10,
+                "agent_type": "agent_type",
                 "tags": ["tag1", "tag2", "tag3"],
                 "depends_on": ["task_id1", "task_id2"],
              }}]
              ```
             "#,
-            idea, context
+            idea, tech_stack, context, available_agents_types
         )
     }
 

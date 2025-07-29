@@ -1,7 +1,7 @@
 use super::agent::Agent;
 use super::issue::Issue;
 use super::task::Task;
-use crate::enums::{CodeStatus, CommentType, TaskStatus};
+use crate::enums::{CodeStatus, CommentType, TaskStatus, TechStack};
 use crate::error::{OrchestratorError, Result};
 use crate::models::comment::Comment;
 use crate::models::pull_request::PullRequest;
@@ -44,6 +44,7 @@ pub struct Project {
     pub repository_url: Option<String>,
     pub project_path: String,
     pub status: ProjectStatus,
+    pub tech_stack: TechStack,
     pub tasks: Vec<Task>,
     pub issues: Vec<Issue>,
     pub agents: Vec<Agent>,
@@ -68,6 +69,7 @@ impl Project {
             repository_url: None,
             project_path: project_path.into(),
             status: ProjectStatus::default(),
+            tech_stack: TechStack::default(),
             tasks: Vec::new(),
             issues: Vec::new(),
             agents: Vec::new(),
@@ -76,6 +78,59 @@ impl Project {
             updated_at: now,
             dependencies_urls: None,
         }
+    }
+
+    /// Create a new project with tech stack
+    pub fn new_with_tech_stack(
+        name: impl Into<String>,
+        idea: impl Into<String>,
+        project_path: impl Into<String>,
+        tech_stack: TechStack,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            idea: idea.into(),
+            name: name.into(),
+            repository_url: None,
+            project_path: project_path.into(),
+            status: ProjectStatus::default(),
+            tech_stack,
+            tasks: Vec::new(),
+            issues: Vec::new(),
+            agents: Vec::new(),
+            tasks_history: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            dependencies_urls: None,
+        }
+    }
+
+    /// Set the tech stack for the project
+    pub fn set_tech_stack(&mut self, tech_stack: TechStack) {
+        self.tech_stack = tech_stack;
+        self.updated_at = Utc::now();
+    }
+
+    /// Get available agent types from the project's agents
+    pub fn get_available_agent_types(&self) -> Vec<String> {
+        self.agents
+            .iter()
+            .map(|agent| format!("{:?}", agent.agent_type))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// Load agents from directory and add them to the project
+    pub async fn load_agents_from_directory(&mut self, agents_dir: &str) -> Result<()> {
+        use crate::models::agent::Agent;
+
+        let agents = Agent::load_agents_from_directory(agents_dir).await?;
+        for agent in agents {
+            self.add_agent(agent)?;
+        }
+        Ok(())
     }
 
     /// Set the repository URL for the project

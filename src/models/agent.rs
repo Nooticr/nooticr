@@ -1,5 +1,5 @@
 use super::agent_status_change::AgentStatusChange;
-use crate::enums::AgentStatus;
+use crate::enums::{AgentStatus, AgentType};
 use crate::error::{OrchestratorError, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ pub struct Agent {
     pub name: String,
     pub file_path: PathBuf,
     pub description: String,
+    pub agent_type: AgentType,
     pub status: AgentStatus,
     pub status_history: Vec<AgentStatusChange>,
     pub created_at: DateTime<Utc>,
@@ -38,6 +39,7 @@ impl Agent {
             name: name.into(),
             file_path,
             description: description.into(),
+            agent_type: AgentType::default(),
             status: initial_status,
             status_history: vec![AgentStatusChange {
                 from: None,
@@ -51,6 +53,202 @@ impl Agent {
             error_count: 0,
             total_tasks_completed: 0,
         }
+    }
+
+    /// Create a new agent with specific type
+    pub fn new_with_type(
+        name: impl Into<String>,
+        file_path: PathBuf,
+        description: impl Into<String>,
+        agent_type: AgentType,
+    ) -> Self {
+        let now = Utc::now();
+        let initial_status = AgentStatus::default();
+
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            file_path,
+            description: description.into(),
+            agent_type,
+            status: initial_status,
+            status_history: vec![AgentStatusChange {
+                from: None,
+                to: initial_status,
+                reason: Some("Agent created".to_string()),
+                timestamp: now,
+            }],
+            created_at: now,
+            updated_at: now,
+            last_active_at: None,
+            error_count: 0,
+            total_tasks_completed: 0,
+        }
+    }
+
+    /// Set the agent type
+    pub fn set_agent_type(&mut self, agent_type: AgentType) {
+        self.agent_type = agent_type;
+        self.updated_at = Utc::now();
+    }
+
+    /// Parse agent type from filename
+    pub fn parse_agent_type_from_filename(filename: &str) -> AgentType {
+        match filename {
+            "backend_engineer_rust.md" => AgentType::BackendEngineerRust,
+            "backend_qa_rust.md" => AgentType::BackendQARust,
+            "frontend_engineer_vue.md" => AgentType::FrontendEngineerVue,
+            "frontend_qa_vue.md" => AgentType::FrontendQAVue,
+            "frontend_engineer_react.md" => AgentType::FrontendEngineerReact,
+            "frontend_qa_react.md" => AgentType::FrontendQAReact,
+            "devops.md" => AgentType::DevOps,
+            "performance_engineer.md" => AgentType::PerformanceEngineer,
+            "security_engineer.md" => AgentType::SecurityEngineer,
+            "codereview_eng.md" => AgentType::CodeReviewEngineer,
+            "release_mmanager.md" => AgentType::ReleaseManager,
+            _ => AgentType::default(),
+        }
+    }
+
+    /// Load agents from the agents directory
+    pub async fn load_agents_from_directory(agents_dir: &str) -> Result<Vec<Agent>> {
+        use std::fs;
+        use std::path::Path;
+
+        // Try multiple possible locations for the agents directory
+        let possible_paths = vec![
+            Path::new(agents_dir).to_path_buf(),
+            Path::new("./agents").to_path_buf(),
+            Path::new("../agents").to_path_buf(),
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.join("agents")))
+                .unwrap_or_else(|| Path::new("agents").to_path_buf()),
+            dirs::home_dir()
+                .map(|h| h.join(".orchy").join("agents"))
+                .unwrap_or_else(|| Path::new("agents").to_path_buf()),
+            // Try relative to the source directory (for development)
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("agents"),
+        ];
+
+        let mut agents_path = None;
+        for path in possible_paths {
+            if path.exists() && path.is_dir() {
+                agents_path = Some(path);
+                break;
+            }
+        }
+
+        let agents_path = agents_path.ok_or_else(|| {
+            OrchestratorError::validation(format!(
+                "Agents directory not found. Tried: {:?}. Please ensure agents directory exists.",
+                vec![
+                    agents_dir,
+                    "./agents",
+                    "../agents",
+                    "~/.orchy/agents",
+                    "agents (relative to executable)"
+                ]
+            ))
+        })?;
+
+        let mut agents = Vec::new();
+        let entries = fs::read_dir(&agents_path)
+            .map_err(|e| OrchestratorError::internal(format!("Failed to read agents directory: {}", e)))?;
+
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| OrchestratorError::internal(format!("Failed to read directory entry: {}", e)))?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
+                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                    let agent_type = Self::parse_agent_type_from_filename(filename);
+
+                    // Read the file content to get description
+                    let content = fs::read_to_string(&path)
+                        .map_err(|e| OrchestratorError::internal(format!("Failed to read agent file: {}", e)))?;
+
+                    // Extract name from filename (remove .md extension)
+                    let name = filename.trim_end_matches(".md").replace('_', " ");
+                    let name = name.split_whitespace()
+                        .map(|word| {
+                            let mut chars = word.chars();
+                            match chars.next() {
+                                None => String::new(),
+                                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+
+                    // Parse YAML front matter to extract description
+                    let description = Self::extract_description_from_content(&content, &name);
+
+                    let agent = Agent::new_with_type(name, path, description, agent_type);
+                    agents.push(agent);
+                }
+            }
+        }
+
+        Ok(agents)
+    }
+
+    /// Extract description from agent file content (YAML front matter)
+    fn extract_description_from_content(content: &str, fallback_name: &str) -> String {
+        // Check if content starts with YAML front matter
+        if content.starts_with("---") {
+            let lines: Vec<&str> = content.lines().collect();
+            let mut in_front_matter = false;
+            let mut front_matter_end = 0;
+
+            // Find the end of front matter
+            for (i, line) in lines.iter().enumerate() {
+                if i == 0 && line.trim() == "---" {
+                    in_front_matter = true;
+                    continue;
+                }
+                if in_front_matter && line.trim() == "---" {
+                    front_matter_end = i;
+                    break;
+                }
+            }
+
+            // Extract description from front matter
+            if front_matter_end > 0 {
+                for i in 1..front_matter_end {
+                    let line = lines[i].trim();
+                    if line.starts_with("description:") {
+                        let description = line.trim_start_matches("description:")
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .to_string();
+                        if !description.is_empty() {
+                            return description;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: use the first non-empty line that's not front matter or markdown header
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty()
+                && !trimmed.starts_with("---")
+                && !trimmed.starts_with('#')
+                && !trimmed.starts_with("name:")
+                && !trimmed.starts_with("description:")
+                && !trimmed.starts_with("tools:")
+                && !trimmed.starts_with("technologies:")
+            {
+                return trimmed.to_string();
+            }
+        }
+
+        // Final fallback: use the agent name
+        fallback_name.to_string()
     }
 
     /// Transition the agent to a new status with validation

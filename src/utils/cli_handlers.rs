@@ -2,7 +2,7 @@ use crate::models::project::Project;
 use crate::models::agent::Agent;
 use crate::models::task::Task;
 use crate::models::issue::Issue;
-use crate::enums::Priority;
+use crate::enums::{Priority, TechStack};
 use crate::utils::cli::*;
 use clap::ArgMatches;
 use std::collections::HashMap;
@@ -11,6 +11,18 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+/// Parse tech stack from string
+fn parse_tech_stack(tech_stack_str: &str) -> Result<TechStack, Box<dyn std::error::Error>> {
+    match tech_stack_str.to_lowercase().as_str() {
+        "rust" => Ok(TechStack::Rust),
+        "vue" => Ok(TechStack::Vue),
+        "react" => Ok(TechStack::React),
+        "fullstack-rust-vue" | "rust-vue" => Ok(TechStack::FullstackRustVue),
+        "fullstack-rust-react" | "rust-react" => Ok(TechStack::FullstackRustReact),
+        _ => Err(format!("Invalid tech stack: {}. Valid options: rust, vue, react, fullstack-rust-vue, fullstack-rust-react", tech_stack_str).into()),
+    }
+}
+
 /// Handle the create project command
 pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let name = matches.get_one::<String>("name").unwrap();
@@ -18,13 +30,29 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     let path = matches.get_one::<String>("path").unwrap();
     let repository_url = matches.get_one::<String>("repository-url");
     let dependencies_urls = matches.get_one::<String>("dependencies-urls");
+    let tech_stack_str = matches.get_one::<String>("tech-stack");
 
     println!("Creating project: {}", name);
     println!("Idea: {}", idea);
     println!("Path: {}", path);
 
-    // Create the project
-    let mut project = Project::new(name, idea, path);
+    // Parse tech stack
+    let tech_stack = if let Some(ts) = tech_stack_str {
+        parse_tech_stack(ts)?
+    } else {
+        TechStack::default()
+    };
+
+    // Create the project with tech stack
+    let mut project = Project::new_with_tech_stack(name, idea, path, tech_stack);
+    println!("Tech Stack: {:?}", project.tech_stack);
+
+    // Load agents from the agents directory
+    if let Err(e) = project.load_agents_from_directory("agents").await {
+        eprintln!("Warning: Failed to load agents from directory: {}", e);
+    } else {
+        println!("Loaded {} agents from agents directory", project.agents.len());
+    }
 
     // Set optional repository URL
     if let Some(repo_url) = repository_url {

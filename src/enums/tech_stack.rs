@@ -7,6 +7,9 @@ pub enum TechStack {
     Rust,
     Vue,
     React,
-    Fullstack(Rust, Vue),
-    Fullstack(Rust, React),
+    FullstackRustVue,
+    FullstackRustReact,
 }
+
+// Re-export the variants for easier access
+pub use TechStack::*;
