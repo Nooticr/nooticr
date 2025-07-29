@@ -1,5 +1,5 @@
+use crate::error::{OrchestratorError, Result};
 use serde::{Deserialize, Serialize};
-use crate::error::{Result, OrchestratorError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TaskStatus {
@@ -25,22 +25,30 @@ impl TaskStatus {
             (TaskStatus::Testing, TaskStatus::Completed) => Ok(next),
 
             // Can be blocked or failed from InProgress, UnderReview, or Testing
-            (TaskStatus::InProgress | TaskStatus::UnderReview | TaskStatus::Testing,
-             TaskStatus::Blocked | TaskStatus::Failed) => Ok(next),
+            (
+                TaskStatus::InProgress | TaskStatus::UnderReview | TaskStatus::Testing,
+                TaskStatus::Blocked | TaskStatus::Failed,
+            ) => Ok(next),
 
             // From Blocked or Failed, can go back to InProgress
             (TaskStatus::Blocked | TaskStatus::Failed, TaskStatus::InProgress) => Ok(next),
 
             // Can be cancelled from any non-terminal state
-            (TaskStatus::Pending | TaskStatus::InProgress | TaskStatus::UnderReview |
-             TaskStatus::Testing | TaskStatus::Blocked | TaskStatus::Failed,
-             TaskStatus::Cancelled) => Ok(next),
+            (
+                TaskStatus::Pending
+                | TaskStatus::InProgress
+                | TaskStatus::UnderReview
+                | TaskStatus::Testing
+                | TaskStatus::Blocked
+                | TaskStatus::Failed,
+                TaskStatus::Cancelled,
+            ) => Ok(next),
 
             // Invalid transitions
             _ => Err(OrchestratorError::task_transition(self.clone(), next)),
         }
     }
-    
+
     /// Get valid next states from current state
     pub fn valid_transitions(&self) -> Vec<TaskStatus> {
         match self {
@@ -64,19 +72,18 @@ impl TaskStatus {
                 TaskStatus::Cancelled,
             ],
             TaskStatus::Completed => vec![], // Terminal state
-            TaskStatus::Blocked | TaskStatus::Failed => vec![
-                TaskStatus::InProgress,
-                TaskStatus::Cancelled,
-            ],
+            TaskStatus::Blocked | TaskStatus::Failed => {
+                vec![TaskStatus::InProgress, TaskStatus::Cancelled]
+            }
             TaskStatus::Cancelled => vec![], // Terminal state
         }
     }
-    
+
     /// Check if the current state is terminal (no further transitions possible)
     pub fn is_terminal(&self) -> bool {
         matches!(self, TaskStatus::Completed | TaskStatus::Cancelled)
     }
-    
+
     /// Attempt to progress to the next state in the normal workflow
     pub fn progress(&self) -> Result<TaskStatus> {
         match self {
@@ -106,30 +113,56 @@ mod tests {
         let mut status = TaskStatus::Pending;
 
         // Pending -> InProgress
-        status = status.transition_to(TaskStatus::InProgress).expect("Should transition to InProgress");
+        status = status
+            .transition_to(TaskStatus::InProgress)
+            .expect("Should transition to InProgress");
         assert_eq!(status, TaskStatus::InProgress);
 
         // InProgress -> UnderReview
-        status = status.transition_to(TaskStatus::UnderReview).expect("Should transition to UnderReview");
+        status = status
+            .transition_to(TaskStatus::UnderReview)
+            .expect("Should transition to UnderReview");
         assert_eq!(status, TaskStatus::UnderReview);
 
         // UnderReview -> Testing
-        status = status.transition_to(TaskStatus::Testing).expect("Should transition to Testing");
+        status = status
+            .transition_to(TaskStatus::Testing)
+            .expect("Should transition to Testing");
         assert_eq!(status, TaskStatus::Testing);
 
         // Testing -> Completed
-        status = status.transition_to(TaskStatus::Completed).expect("Should transition to Completed");
+        status = status
+            .transition_to(TaskStatus::Completed)
+            .expect("Should transition to Completed");
         assert_eq!(status, TaskStatus::Completed);
     }
 
     #[test]
     fn test_task_status_progress_method() {
-        assert_eq!(TaskStatus::Pending.progress().unwrap(), TaskStatus::InProgress);
-        assert_eq!(TaskStatus::InProgress.progress().unwrap(), TaskStatus::UnderReview);
-        assert_eq!(TaskStatus::UnderReview.progress().unwrap(), TaskStatus::Testing);
-        assert_eq!(TaskStatus::Testing.progress().unwrap(), TaskStatus::Completed);
-        assert_eq!(TaskStatus::Blocked.progress().unwrap(), TaskStatus::InProgress);
-        assert_eq!(TaskStatus::Failed.progress().unwrap(), TaskStatus::InProgress);
+        assert_eq!(
+            TaskStatus::Pending.progress().unwrap(),
+            TaskStatus::InProgress
+        );
+        assert_eq!(
+            TaskStatus::InProgress.progress().unwrap(),
+            TaskStatus::UnderReview
+        );
+        assert_eq!(
+            TaskStatus::UnderReview.progress().unwrap(),
+            TaskStatus::Testing
+        );
+        assert_eq!(
+            TaskStatus::Testing.progress().unwrap(),
+            TaskStatus::Completed
+        );
+        assert_eq!(
+            TaskStatus::Blocked.progress().unwrap(),
+            TaskStatus::InProgress
+        );
+        assert_eq!(
+            TaskStatus::Failed.progress().unwrap(),
+            TaskStatus::InProgress
+        );
 
         // Terminal states should error
         assert!(TaskStatus::Completed.progress().is_err());
@@ -139,50 +172,146 @@ mod tests {
     #[test]
     fn test_task_status_blocking_and_failure() {
         // Can be blocked from InProgress, UnderReview, Testing
-        assert!(TaskStatus::InProgress.transition_to(TaskStatus::Blocked).is_ok());
-        assert!(TaskStatus::UnderReview.transition_to(TaskStatus::Blocked).is_ok());
-        assert!(TaskStatus::Testing.transition_to(TaskStatus::Blocked).is_ok());
+        assert!(
+            TaskStatus::InProgress
+                .transition_to(TaskStatus::Blocked)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::UnderReview
+                .transition_to(TaskStatus::Blocked)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::Testing
+                .transition_to(TaskStatus::Blocked)
+                .is_ok()
+        );
 
         // Can be failed from InProgress, UnderReview, Testing
-        assert!(TaskStatus::InProgress.transition_to(TaskStatus::Failed).is_ok());
-        assert!(TaskStatus::UnderReview.transition_to(TaskStatus::Failed).is_ok());
-        assert!(TaskStatus::Testing.transition_to(TaskStatus::Failed).is_ok());
+        assert!(
+            TaskStatus::InProgress
+                .transition_to(TaskStatus::Failed)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::UnderReview
+                .transition_to(TaskStatus::Failed)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::Testing
+                .transition_to(TaskStatus::Failed)
+                .is_ok()
+        );
 
         // Can recover from Blocked/Failed to InProgress
-        assert!(TaskStatus::Blocked.transition_to(TaskStatus::InProgress).is_ok());
-        assert!(TaskStatus::Failed.transition_to(TaskStatus::InProgress).is_ok());
+        assert!(
+            TaskStatus::Blocked
+                .transition_to(TaskStatus::InProgress)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::Failed
+                .transition_to(TaskStatus::InProgress)
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_task_status_cancellation() {
         // Can be cancelled from any non-terminal state
-        assert!(TaskStatus::Pending.transition_to(TaskStatus::Cancelled).is_ok());
-        assert!(TaskStatus::InProgress.transition_to(TaskStatus::Cancelled).is_ok());
-        assert!(TaskStatus::UnderReview.transition_to(TaskStatus::Cancelled).is_ok());
-        assert!(TaskStatus::Testing.transition_to(TaskStatus::Cancelled).is_ok());
-        assert!(TaskStatus::Blocked.transition_to(TaskStatus::Cancelled).is_ok());
-        assert!(TaskStatus::Failed.transition_to(TaskStatus::Cancelled).is_ok());
+        assert!(
+            TaskStatus::Pending
+                .transition_to(TaskStatus::Cancelled)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::InProgress
+                .transition_to(TaskStatus::Cancelled)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::UnderReview
+                .transition_to(TaskStatus::Cancelled)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::Testing
+                .transition_to(TaskStatus::Cancelled)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::Blocked
+                .transition_to(TaskStatus::Cancelled)
+                .is_ok()
+        );
+        assert!(
+            TaskStatus::Failed
+                .transition_to(TaskStatus::Cancelled)
+                .is_ok()
+        );
 
         // Cannot be cancelled from terminal states
-        assert!(TaskStatus::Completed.transition_to(TaskStatus::Cancelled).is_err());
-        assert!(TaskStatus::Cancelled.transition_to(TaskStatus::Cancelled).is_err());
+        assert!(
+            TaskStatus::Completed
+                .transition_to(TaskStatus::Cancelled)
+                .is_err()
+        );
+        assert!(
+            TaskStatus::Cancelled
+                .transition_to(TaskStatus::Cancelled)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_task_status_invalid_transitions() {
         // Cannot skip states in normal flow
-        assert!(TaskStatus::Pending.transition_to(TaskStatus::UnderReview).is_err());
-        assert!(TaskStatus::Pending.transition_to(TaskStatus::Testing).is_err());
-        assert!(TaskStatus::Pending.transition_to(TaskStatus::Completed).is_err());
+        assert!(
+            TaskStatus::Pending
+                .transition_to(TaskStatus::UnderReview)
+                .is_err()
+        );
+        assert!(
+            TaskStatus::Pending
+                .transition_to(TaskStatus::Testing)
+                .is_err()
+        );
+        assert!(
+            TaskStatus::Pending
+                .transition_to(TaskStatus::Completed)
+                .is_err()
+        );
 
         // Cannot go backwards in normal flow
-        assert!(TaskStatus::UnderReview.transition_to(TaskStatus::InProgress).is_err());
-        assert!(TaskStatus::Testing.transition_to(TaskStatus::UnderReview).is_err());
-        assert!(TaskStatus::Completed.transition_to(TaskStatus::Testing).is_err());
+        assert!(
+            TaskStatus::UnderReview
+                .transition_to(TaskStatus::InProgress)
+                .is_err()
+        );
+        assert!(
+            TaskStatus::Testing
+                .transition_to(TaskStatus::UnderReview)
+                .is_err()
+        );
+        assert!(
+            TaskStatus::Completed
+                .transition_to(TaskStatus::Testing)
+                .is_err()
+        );
 
         // Cannot transition from terminal states
-        assert!(TaskStatus::Completed.transition_to(TaskStatus::InProgress).is_err());
-        assert!(TaskStatus::Cancelled.transition_to(TaskStatus::InProgress).is_err());
+        assert!(
+            TaskStatus::Completed
+                .transition_to(TaskStatus::InProgress)
+                .is_err()
+        );
+        assert!(
+            TaskStatus::Cancelled
+                .transition_to(TaskStatus::InProgress)
+                .is_err()
+        );
     }
 
     #[test]
@@ -218,7 +347,3 @@ mod tests {
         assert!(cancelled_transitions.is_empty());
     }
 }
-
-
-
-

@@ -1,8 +1,7 @@
+use crate::enums::CommentType;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use crate::enums::CommentType;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
@@ -20,7 +19,7 @@ impl Comment {
     pub fn new(
         author: impl Into<String>,
         content: impl Into<String>,
-        comment_type: CommentType
+        comment_type: CommentType,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -39,7 +38,7 @@ impl Comment {
         author: impl Into<String>,
         content: impl Into<String>,
         comment_type: CommentType,
-        remotly_synced: bool
+        remotly_synced: bool,
     ) -> Self {
         let now = Utc::now();
         Self {

@@ -1,5 +1,5 @@
+use crate::error::{OrchestratorError, Result};
 use serde::{Deserialize, Serialize};
-use crate::error::{Result, OrchestratorError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CodeStatus {
@@ -24,7 +24,10 @@ impl CodeStatus {
             (CodeStatus::Coded, CodeStatus::PullRequest) => Ok(next),
 
             // From PullRequest, can go to CI states or MergeConflict
-            (CodeStatus::PullRequest, CodeStatus::CISuccessful | CodeStatus::CIFailed | CodeStatus::MergeConflict) => Ok(next),
+            (
+                CodeStatus::PullRequest,
+                CodeStatus::CISuccessful | CodeStatus::CIFailed | CodeStatus::MergeConflict,
+            ) => Ok(next),
 
             // Only CISuccessful can proceed to Mergeable
             (CodeStatus::CISuccessful, CodeStatus::Mergeable) => Ok(next),
@@ -36,15 +39,22 @@ impl CodeStatus {
             (CodeStatus::CIFailed | CodeStatus::MergeConflict, CodeStatus::Coded) => Ok(next),
 
             // Can abandon from various states
-            (CodeStatus::Pending | CodeStatus::Coded | CodeStatus::PullRequest |
-             CodeStatus::CIFailed | CodeStatus::MergeConflict | CodeStatus::CISuccessful |
-             CodeStatus::Mergeable, CodeStatus::Abandoned) => Ok(next),
+            (
+                CodeStatus::Pending
+                | CodeStatus::Coded
+                | CodeStatus::PullRequest
+                | CodeStatus::CIFailed
+                | CodeStatus::MergeConflict
+                | CodeStatus::CISuccessful
+                | CodeStatus::Mergeable,
+                CodeStatus::Abandoned,
+            ) => Ok(next),
 
             // Invalid transitions
             _ => Err(OrchestratorError::code_transition(*self, next)),
         }
     }
-    
+
     /// Get valid next states from current state
     pub fn valid_transitions(&self) -> Vec<CodeStatus> {
         match self {
@@ -60,34 +70,34 @@ impl CodeStatus {
             CodeStatus::CIFailed => vec![CodeStatus::Coded, CodeStatus::Abandoned],
             CodeStatus::MergeConflict => vec![CodeStatus::Coded, CodeStatus::Abandoned],
             CodeStatus::Mergeable => vec![CodeStatus::Merged, CodeStatus::Abandoned],
-            CodeStatus::Merged => vec![], // Terminal state
+            CodeStatus::Merged => vec![],    // Terminal state
             CodeStatus::Abandoned => vec![], // Terminal state
         }
     }
-    
+
     /// Check if the current state is terminal (no further transitions possible)
     pub fn is_terminal(&self) -> bool {
         matches!(self, CodeStatus::Merged | CodeStatus::Abandoned)
     }
-    
+
     /// Check if the current state indicates a failure that needs fixing
     pub fn is_failure_state(&self) -> bool {
         matches!(self, CodeStatus::CIFailed | CodeStatus::MergeConflict)
     }
-    
+
     /// Check if CI passed
     pub fn is_ci_passed(&self) -> bool {
         matches!(self, CodeStatus::CISuccessful)
     }
-    
+
     /// Attempt to progress to the next state in the normal workflow
     pub fn progress(&self) -> Result<CodeStatus> {
         match self {
             CodeStatus::Pending => Ok(CodeStatus::Coded),
             CodeStatus::Coded => Ok(CodeStatus::PullRequest),
-            CodeStatus::PullRequest => {
-                Err(OrchestratorError::code_external_action("Pull request needs CI to run"))
-            }
+            CodeStatus::PullRequest => Err(OrchestratorError::code_external_action(
+                "Pull request needs CI to run",
+            )),
             CodeStatus::CISuccessful => Ok(CodeStatus::Mergeable),
             CodeStatus::Mergeable => Ok(CodeStatus::Merged),
             CodeStatus::CIFailed | CodeStatus::MergeConflict => Ok(CodeStatus::Coded),
@@ -112,34 +122,56 @@ mod tests {
         let mut status = CodeStatus::Pending;
 
         // Pending -> Coded
-        status = status.transition_to(CodeStatus::Coded).expect("Should transition to Coded");
+        status = status
+            .transition_to(CodeStatus::Coded)
+            .expect("Should transition to Coded");
         assert_eq!(status, CodeStatus::Coded);
 
         // Coded -> PullRequest
-        status = status.transition_to(CodeStatus::PullRequest).expect("Should transition to PullRequest");
+        status = status
+            .transition_to(CodeStatus::PullRequest)
+            .expect("Should transition to PullRequest");
         assert_eq!(status, CodeStatus::PullRequest);
 
         // PullRequest -> CISuccessful
-        status = status.transition_to(CodeStatus::CISuccessful).expect("Should transition to CISuccessful");
+        status = status
+            .transition_to(CodeStatus::CISuccessful)
+            .expect("Should transition to CISuccessful");
         assert_eq!(status, CodeStatus::CISuccessful);
 
         // CISuccessful -> Mergeable
-        status = status.transition_to(CodeStatus::Mergeable).expect("Should transition to Mergeable");
+        status = status
+            .transition_to(CodeStatus::Mergeable)
+            .expect("Should transition to Mergeable");
         assert_eq!(status, CodeStatus::Mergeable);
 
         // Mergeable -> Merged
-        status = status.transition_to(CodeStatus::Merged).expect("Should transition to Merged");
+        status = status
+            .transition_to(CodeStatus::Merged)
+            .expect("Should transition to Merged");
         assert_eq!(status, CodeStatus::Merged);
     }
 
     #[test]
     fn test_code_status_progress_method() {
         assert_eq!(CodeStatus::Pending.progress().unwrap(), CodeStatus::Coded);
-        assert_eq!(CodeStatus::Coded.progress().unwrap(), CodeStatus::PullRequest);
-        assert_eq!(CodeStatus::CISuccessful.progress().unwrap(), CodeStatus::Mergeable);
-        assert_eq!(CodeStatus::Mergeable.progress().unwrap(), CodeStatus::Merged);
+        assert_eq!(
+            CodeStatus::Coded.progress().unwrap(),
+            CodeStatus::PullRequest
+        );
+        assert_eq!(
+            CodeStatus::CISuccessful.progress().unwrap(),
+            CodeStatus::Mergeable
+        );
+        assert_eq!(
+            CodeStatus::Mergeable.progress().unwrap(),
+            CodeStatus::Merged
+        );
         assert_eq!(CodeStatus::CIFailed.progress().unwrap(), CodeStatus::Coded);
-        assert_eq!(CodeStatus::MergeConflict.progress().unwrap(), CodeStatus::Coded);
+        assert_eq!(
+            CodeStatus::MergeConflict.progress().unwrap(),
+            CodeStatus::Coded
+        );
 
         // PullRequest needs external action (CI)
         assert!(CodeStatus::PullRequest.progress().is_err());
@@ -154,19 +186,27 @@ mod tests {
         let mut status = CodeStatus::PullRequest;
 
         // PullRequest -> CIFailed
-        status = status.transition_to(CodeStatus::CIFailed).expect("Should transition to CIFailed");
+        status = status
+            .transition_to(CodeStatus::CIFailed)
+            .expect("Should transition to CIFailed");
         assert_eq!(status, CodeStatus::CIFailed);
 
         // CIFailed -> Coded (for fixes)
-        status = status.transition_to(CodeStatus::Coded).expect("Should transition to Coded");
+        status = status
+            .transition_to(CodeStatus::Coded)
+            .expect("Should transition to Coded");
         assert_eq!(status, CodeStatus::Coded);
 
         // Coded -> PullRequest (retry)
-        status = status.transition_to(CodeStatus::PullRequest).expect("Should transition to PullRequest");
+        status = status
+            .transition_to(CodeStatus::PullRequest)
+            .expect("Should transition to PullRequest");
         assert_eq!(status, CodeStatus::PullRequest);
 
         // PullRequest -> CISuccessful
-        status = status.transition_to(CodeStatus::CISuccessful).expect("Should transition to CISuccessful");
+        status = status
+            .transition_to(CodeStatus::CISuccessful)
+            .expect("Should transition to CISuccessful");
         assert_eq!(status, CodeStatus::CISuccessful);
     }
 
@@ -175,48 +215,120 @@ mod tests {
         let mut status = CodeStatus::PullRequest;
 
         // PullRequest -> MergeConflict
-        status = status.transition_to(CodeStatus::MergeConflict).expect("Should transition to MergeConflict");
+        status = status
+            .transition_to(CodeStatus::MergeConflict)
+            .expect("Should transition to MergeConflict");
         assert_eq!(status, CodeStatus::MergeConflict);
 
         // MergeConflict -> Coded (for fixes)
-        status = status.transition_to(CodeStatus::Coded).expect("Should transition to Coded");
+        status = status
+            .transition_to(CodeStatus::Coded)
+            .expect("Should transition to Coded");
         assert_eq!(status, CodeStatus::Coded);
     }
 
     #[test]
     fn test_code_status_abandonment() {
         // Can abandon from most states
-        assert!(CodeStatus::Pending.transition_to(CodeStatus::Abandoned).is_ok());
-        assert!(CodeStatus::Coded.transition_to(CodeStatus::Abandoned).is_ok());
-        assert!(CodeStatus::PullRequest.transition_to(CodeStatus::Abandoned).is_ok());
-        assert!(CodeStatus::CIFailed.transition_to(CodeStatus::Abandoned).is_ok());
-        assert!(CodeStatus::MergeConflict.transition_to(CodeStatus::Abandoned).is_ok());
-        assert!(CodeStatus::CISuccessful.transition_to(CodeStatus::Abandoned).is_ok());
-        assert!(CodeStatus::Mergeable.transition_to(CodeStatus::Abandoned).is_ok());
+        assert!(
+            CodeStatus::Pending
+                .transition_to(CodeStatus::Abandoned)
+                .is_ok()
+        );
+        assert!(
+            CodeStatus::Coded
+                .transition_to(CodeStatus::Abandoned)
+                .is_ok()
+        );
+        assert!(
+            CodeStatus::PullRequest
+                .transition_to(CodeStatus::Abandoned)
+                .is_ok()
+        );
+        assert!(
+            CodeStatus::CIFailed
+                .transition_to(CodeStatus::Abandoned)
+                .is_ok()
+        );
+        assert!(
+            CodeStatus::MergeConflict
+                .transition_to(CodeStatus::Abandoned)
+                .is_ok()
+        );
+        assert!(
+            CodeStatus::CISuccessful
+                .transition_to(CodeStatus::Abandoned)
+                .is_ok()
+        );
+        assert!(
+            CodeStatus::Mergeable
+                .transition_to(CodeStatus::Abandoned)
+                .is_ok()
+        );
 
         // Cannot abandon from terminal states
-        assert!(CodeStatus::Merged.transition_to(CodeStatus::Abandoned).is_err());
-        assert!(CodeStatus::Abandoned.transition_to(CodeStatus::Abandoned).is_err());
+        assert!(
+            CodeStatus::Merged
+                .transition_to(CodeStatus::Abandoned)
+                .is_err()
+        );
+        assert!(
+            CodeStatus::Abandoned
+                .transition_to(CodeStatus::Abandoned)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_code_status_invalid_transitions() {
         // Cannot skip states in normal flow
-        assert!(CodeStatus::Pending.transition_to(CodeStatus::PullRequest).is_err());
-        assert!(CodeStatus::Pending.transition_to(CodeStatus::Mergeable).is_err());
-        assert!(CodeStatus::Coded.transition_to(CodeStatus::Mergeable).is_err());
+        assert!(
+            CodeStatus::Pending
+                .transition_to(CodeStatus::PullRequest)
+                .is_err()
+        );
+        assert!(
+            CodeStatus::Pending
+                .transition_to(CodeStatus::Mergeable)
+                .is_err()
+        );
+        assert!(
+            CodeStatus::Coded
+                .transition_to(CodeStatus::Mergeable)
+                .is_err()
+        );
 
         // Cannot go to Mergeable without CI success
-        assert!(CodeStatus::PullRequest.transition_to(CodeStatus::Mergeable).is_err());
-        assert!(CodeStatus::CIFailed.transition_to(CodeStatus::Mergeable).is_err());
-        assert!(CodeStatus::MergeConflict.transition_to(CodeStatus::Mergeable).is_err());
+        assert!(
+            CodeStatus::PullRequest
+                .transition_to(CodeStatus::Mergeable)
+                .is_err()
+        );
+        assert!(
+            CodeStatus::CIFailed
+                .transition_to(CodeStatus::Mergeable)
+                .is_err()
+        );
+        assert!(
+            CodeStatus::MergeConflict
+                .transition_to(CodeStatus::Mergeable)
+                .is_err()
+        );
 
         // Cannot transition from terminal states
         assert!(CodeStatus::Merged.transition_to(CodeStatus::Coded).is_err());
-        assert!(CodeStatus::Abandoned.transition_to(CodeStatus::Coded).is_err());
+        assert!(
+            CodeStatus::Abandoned
+                .transition_to(CodeStatus::Coded)
+                .is_err()
+        );
 
         // Cannot stay in same state
-        assert!(CodeStatus::Pending.transition_to(CodeStatus::Pending).is_err());
+        assert!(
+            CodeStatus::Pending
+                .transition_to(CodeStatus::Pending)
+                .is_err()
+        );
         assert!(CodeStatus::Coded.transition_to(CodeStatus::Coded).is_err());
     }
 
@@ -280,4 +392,3 @@ mod tests {
         assert!(abandoned_transitions.is_empty());
     }
 }
-

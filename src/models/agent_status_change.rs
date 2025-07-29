@@ -1,9 +1,6 @@
-
-
-
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 use crate::enums::agent_status::AgentStatus;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentStatusChange {

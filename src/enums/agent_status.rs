@@ -1,7 +1,7 @@
+use crate::error::{OrchestratorError, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
-use crate::error::{Result, OrchestratorError};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum AgentStatus {
@@ -44,13 +44,22 @@ impl AgentStatus {
             (AgentStatus::Idle, AgentStatus::Working | AgentStatus::Maintenance) => Ok(next),
 
             // From Working, can go to Active, Busy, Error, or Idle
-            (AgentStatus::Working, AgentStatus::Active | AgentStatus::Busy | AgentStatus::Error | AgentStatus::Idle) => Ok(next),
+            (
+                AgentStatus::Working,
+                AgentStatus::Active | AgentStatus::Busy | AgentStatus::Error | AgentStatus::Idle,
+            ) => Ok(next),
 
             // From Active, can go to Working, Busy, Error, or Idle
-            (AgentStatus::Active, AgentStatus::Working | AgentStatus::Busy | AgentStatus::Error | AgentStatus::Idle) => Ok(next),
+            (
+                AgentStatus::Active,
+                AgentStatus::Working | AgentStatus::Busy | AgentStatus::Error | AgentStatus::Idle,
+            ) => Ok(next),
 
             // From Busy, can go to Active, Working, Error, or Idle
-            (AgentStatus::Busy, AgentStatus::Active | AgentStatus::Working | AgentStatus::Error | AgentStatus::Idle) => Ok(next),
+            (
+                AgentStatus::Busy,
+                AgentStatus::Active | AgentStatus::Working | AgentStatus::Error | AgentStatus::Idle,
+            ) => Ok(next),
 
             // From Error, can go to Idle or Maintenance
             (AgentStatus::Error, AgentStatus::Idle | AgentStatus::Maintenance) => Ok(next),
@@ -106,10 +115,19 @@ mod tests {
     #[test]
     fn test_agent_status_from_str() {
         assert_eq!("Idle".parse::<AgentStatus>().unwrap(), AgentStatus::Idle);
-        assert_eq!("Working".parse::<AgentStatus>().unwrap(), AgentStatus::Working);
-        assert_eq!("Active".parse::<AgentStatus>().unwrap(), AgentStatus::Active);
+        assert_eq!(
+            "Working".parse::<AgentStatus>().unwrap(),
+            AgentStatus::Working
+        );
+        assert_eq!(
+            "Active".parse::<AgentStatus>().unwrap(),
+            AgentStatus::Active
+        );
         assert_eq!("Error".parse::<AgentStatus>().unwrap(), AgentStatus::Error);
-        assert_eq!("Maintenance".parse::<AgentStatus>().unwrap(), AgentStatus::Maintenance);
+        assert_eq!(
+            "Maintenance".parse::<AgentStatus>().unwrap(),
+            AgentStatus::Maintenance
+        );
         assert_eq!("Busy".parse::<AgentStatus>().unwrap(), AgentStatus::Busy);
 
         assert!("Invalid".parse::<AgentStatus>().is_err());
@@ -120,15 +138,21 @@ mod tests {
         let mut status = AgentStatus::Idle;
 
         // Idle -> Working
-        status = status.transition_to(AgentStatus::Working).expect("Should transition to Working");
+        status = status
+            .transition_to(AgentStatus::Working)
+            .expect("Should transition to Working");
         assert_eq!(status, AgentStatus::Working);
 
         // Working -> Active
-        status = status.transition_to(AgentStatus::Active).expect("Should transition to Active");
+        status = status
+            .transition_to(AgentStatus::Active)
+            .expect("Should transition to Active");
         assert_eq!(status, AgentStatus::Active);
 
         // Active -> Idle
-        status = status.transition_to(AgentStatus::Idle).expect("Should transition to Idle");
+        status = status
+            .transition_to(AgentStatus::Idle)
+            .expect("Should transition to Idle");
         assert_eq!(status, AgentStatus::Idle);
     }
 
@@ -137,71 +161,159 @@ mod tests {
         let mut status = AgentStatus::Active;
 
         // Active -> Busy
-        status = status.transition_to(AgentStatus::Busy).expect("Should transition to Busy");
+        status = status
+            .transition_to(AgentStatus::Busy)
+            .expect("Should transition to Busy");
         assert_eq!(status, AgentStatus::Busy);
 
         // Busy -> Working
-        status = status.transition_to(AgentStatus::Working).expect("Should transition to Working");
+        status = status
+            .transition_to(AgentStatus::Working)
+            .expect("Should transition to Working");
         assert_eq!(status, AgentStatus::Working);
 
         // Working -> Busy
-        status = status.transition_to(AgentStatus::Busy).expect("Should transition to Busy");
+        status = status
+            .transition_to(AgentStatus::Busy)
+            .expect("Should transition to Busy");
         assert_eq!(status, AgentStatus::Busy);
 
         // Busy -> Active
-        status = status.transition_to(AgentStatus::Active).expect("Should transition to Active");
+        status = status
+            .transition_to(AgentStatus::Active)
+            .expect("Should transition to Active");
         assert_eq!(status, AgentStatus::Active);
     }
 
     #[test]
     fn test_agent_status_error_handling() {
         // Can go to Error from Working, Active, or Busy
-        assert!(AgentStatus::Working.transition_to(AgentStatus::Error).is_ok());
-        assert!(AgentStatus::Active.transition_to(AgentStatus::Error).is_ok());
+        assert!(
+            AgentStatus::Working
+                .transition_to(AgentStatus::Error)
+                .is_ok()
+        );
+        assert!(
+            AgentStatus::Active
+                .transition_to(AgentStatus::Error)
+                .is_ok()
+        );
         assert!(AgentStatus::Busy.transition_to(AgentStatus::Error).is_ok());
 
         // From Error, can only go to Idle or Maintenance
         assert!(AgentStatus::Error.transition_to(AgentStatus::Idle).is_ok());
-        assert!(AgentStatus::Error.transition_to(AgentStatus::Maintenance).is_ok());
+        assert!(
+            AgentStatus::Error
+                .transition_to(AgentStatus::Maintenance)
+                .is_ok()
+        );
 
         // Cannot go directly from Error to Working/Active/Busy
-        assert!(AgentStatus::Error.transition_to(AgentStatus::Working).is_err());
-        assert!(AgentStatus::Error.transition_to(AgentStatus::Active).is_err());
+        assert!(
+            AgentStatus::Error
+                .transition_to(AgentStatus::Working)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Error
+                .transition_to(AgentStatus::Active)
+                .is_err()
+        );
         assert!(AgentStatus::Error.transition_to(AgentStatus::Busy).is_err());
     }
 
     #[test]
     fn test_agent_status_maintenance() {
         // Can go to Maintenance from Idle or Error
-        assert!(AgentStatus::Idle.transition_to(AgentStatus::Maintenance).is_ok());
-        assert!(AgentStatus::Error.transition_to(AgentStatus::Maintenance).is_ok());
+        assert!(
+            AgentStatus::Idle
+                .transition_to(AgentStatus::Maintenance)
+                .is_ok()
+        );
+        assert!(
+            AgentStatus::Error
+                .transition_to(AgentStatus::Maintenance)
+                .is_ok()
+        );
 
         // Cannot go to Maintenance from other states
-        assert!(AgentStatus::Working.transition_to(AgentStatus::Maintenance).is_err());
-        assert!(AgentStatus::Active.transition_to(AgentStatus::Maintenance).is_err());
-        assert!(AgentStatus::Busy.transition_to(AgentStatus::Maintenance).is_err());
+        assert!(
+            AgentStatus::Working
+                .transition_to(AgentStatus::Maintenance)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Active
+                .transition_to(AgentStatus::Maintenance)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Busy
+                .transition_to(AgentStatus::Maintenance)
+                .is_err()
+        );
 
         // From Maintenance, can only go to Idle
-        assert!(AgentStatus::Maintenance.transition_to(AgentStatus::Idle).is_ok());
-        assert!(AgentStatus::Maintenance.transition_to(AgentStatus::Working).is_err());
-        assert!(AgentStatus::Maintenance.transition_to(AgentStatus::Active).is_err());
-        assert!(AgentStatus::Maintenance.transition_to(AgentStatus::Error).is_err());
-        assert!(AgentStatus::Maintenance.transition_to(AgentStatus::Busy).is_err());
+        assert!(
+            AgentStatus::Maintenance
+                .transition_to(AgentStatus::Idle)
+                .is_ok()
+        );
+        assert!(
+            AgentStatus::Maintenance
+                .transition_to(AgentStatus::Working)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Maintenance
+                .transition_to(AgentStatus::Active)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Maintenance
+                .transition_to(AgentStatus::Error)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Maintenance
+                .transition_to(AgentStatus::Busy)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_agent_status_invalid_transitions() {
         // Cannot go directly from Idle to Active/Busy/Error
-        assert!(AgentStatus::Idle.transition_to(AgentStatus::Active).is_err());
+        assert!(
+            AgentStatus::Idle
+                .transition_to(AgentStatus::Active)
+                .is_err()
+        );
         assert!(AgentStatus::Idle.transition_to(AgentStatus::Busy).is_err());
         assert!(AgentStatus::Idle.transition_to(AgentStatus::Error).is_err());
 
         // Cannot stay in same state
         assert!(AgentStatus::Idle.transition_to(AgentStatus::Idle).is_err());
-        assert!(AgentStatus::Working.transition_to(AgentStatus::Working).is_err());
-        assert!(AgentStatus::Active.transition_to(AgentStatus::Active).is_err());
-        assert!(AgentStatus::Error.transition_to(AgentStatus::Error).is_err());
-        assert!(AgentStatus::Maintenance.transition_to(AgentStatus::Maintenance).is_err());
+        assert!(
+            AgentStatus::Working
+                .transition_to(AgentStatus::Working)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Active
+                .transition_to(AgentStatus::Active)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Error
+                .transition_to(AgentStatus::Error)
+                .is_err()
+        );
+        assert!(
+            AgentStatus::Maintenance
+                .transition_to(AgentStatus::Maintenance)
+                .is_err()
+        );
         assert!(AgentStatus::Busy.transition_to(AgentStatus::Busy).is_err());
     }
 

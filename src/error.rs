@@ -3,8 +3,8 @@
 //! This module provides a comprehensive error type using thiserror that consolidates
 //! all error types from across the codebase.
 
+use crate::enums::{AgentStatus, CodeStatus, IssueStatus, TaskStatus};
 use thiserror::Error;
-use crate::enums::{AgentStatus, CodeStatus, TaskStatus, IssueStatus};
 
 /// Result type alias for the orchestrator
 pub type Result<T> = std::result::Result<T, OrchestratorError>;

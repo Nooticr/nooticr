@@ -1,14 +1,14 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use super::task::Task;
-use chrono::{DateTime, Utc};
-use super::issue::Issue;
 use super::agent::Agent;
+use super::issue::Issue;
+use super::task::Task;
+use crate::enums::{CodeStatus, CommentType, TaskStatus};
+use crate::error::{OrchestratorError, Result};
 use crate::models::comment::Comment;
-use crate::enums::{TaskStatus, CommentType};
-use crate::error::{Result, OrchestratorError};
+use crate::models::pull_request::PullRequest;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum ProjectStatus {
@@ -24,7 +24,10 @@ pub enum ProjectStatus {
 impl ProjectStatus {
     /// Check if the project is in a terminal state
     pub fn is_terminal(&self) -> bool {
-        matches!(self, ProjectStatus::Completed | ProjectStatus::Cancelled | ProjectStatus::Archived)
+        matches!(
+            self,
+            ProjectStatus::Completed | ProjectStatus::Cancelled | ProjectStatus::Archived
+        )
     }
 
     /// Check if the project can have tasks executed
@@ -71,14 +74,20 @@ impl Project {
     pub fn transition_to(&mut self, new_status: ProjectStatus) -> Result<()> {
         match (&self.status, &new_status) {
             // From Planning
-            (ProjectStatus::Planning, ProjectStatus::Active | ProjectStatus::OnHold | ProjectStatus::Cancelled) => {
+            (
+                ProjectStatus::Planning,
+                ProjectStatus::Active | ProjectStatus::OnHold | ProjectStatus::Cancelled,
+            ) => {
                 self.status = new_status;
                 self.updated_at = Utc::now();
                 Ok(())
             }
 
             // From Active
-            (ProjectStatus::Active, ProjectStatus::OnHold | ProjectStatus::Completed | ProjectStatus::Cancelled) => {
+            (
+                ProjectStatus::Active,
+                ProjectStatus::OnHold | ProjectStatus::Completed | ProjectStatus::Cancelled,
+            ) => {
                 self.status = new_status;
                 self.updated_at = Utc::now();
                 Ok(())
@@ -106,9 +115,10 @@ impl Project {
             }
 
             // Invalid transitions
-            _ => Err(OrchestratorError::validation(
-                format!("Cannot transition project from {:?} to {:?}", self.status, new_status)
-            ))
+            _ => Err(OrchestratorError::validation(format!(
+                "Cannot transition project from {:?} to {:?}",
+                self.status, new_status
+            ))),
         }
     }
 
@@ -118,7 +128,8 @@ impl Project {
             return Vec::new();
         }
 
-        let completed_task_ids: HashSet<Uuid> = self.tasks
+        let completed_task_ids: HashSet<Uuid> = self
+            .tasks
             .iter()
             .filter(|task| task.status == TaskStatus::Completed)
             .map(|task| task.id)
@@ -143,16 +154,14 @@ impl Project {
 
         self.tasks
             .iter()
-            .filter(|task| {
-                task.depends_on.is_empty() &&
-                task.status == TaskStatus::Pending
-            })
+            .filter(|task| task.depends_on.is_empty() && task.status == TaskStatus::Pending)
             .collect()
     }
 
     /// Get tasks that are blocked by dependencies
     pub fn get_blocked_tasks(&self) -> Vec<&Task> {
-        let completed_task_ids: HashSet<Uuid> = self.tasks
+        let completed_task_ids: HashSet<Uuid> = self
+            .tasks
             .iter()
             .filter(|task| task.status == TaskStatus::Completed)
             .map(|task| task.id)
@@ -161,9 +170,12 @@ impl Project {
         self.tasks
             .iter()
             .filter(|task| {
-                !task.depends_on.is_empty() &&
-                !task.depends_on.iter().all(|dep_id| completed_task_ids.contains(dep_id)) &&
-                !matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled)
+                !task.depends_on.is_empty()
+                    && !task
+                        .depends_on
+                        .iter()
+                        .all(|dep_id| completed_task_ids.contains(dep_id))
+                    && !matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled)
             })
             .collect()
     }
@@ -176,9 +188,10 @@ impl Project {
         for task in &self.tasks {
             for dep_id in &task.depends_on {
                 if !task_ids.contains(dep_id) {
-                    return Err(OrchestratorError::validation(
-                        format!("Task '{}' depends on non-existent task {}", task.title, dep_id)
-                    ));
+                    return Err(OrchestratorError::validation(format!(
+                        "Task '{}' depends on non-existent task {}",
+                        task.title, dep_id
+                    )));
                 }
             }
         }
@@ -191,7 +204,7 @@ impl Project {
             if !visited.contains(&task.id) {
                 if self.has_cycle_dfs(task.id, &mut visited, &mut rec_stack)? {
                     return Err(OrchestratorError::validation(
-                        "Circular dependency detected in project tasks"
+                        "Circular dependency detected in project tasks",
                     ));
                 }
             }
@@ -201,12 +214,18 @@ impl Project {
     }
 
     /// Helper method for cycle detection using DFS
-    fn has_cycle_dfs(&self, task_id: Uuid, visited: &mut HashSet<Uuid>, rec_stack: &mut HashSet<Uuid>) -> Result<bool> {
+    fn has_cycle_dfs(
+        &self,
+        task_id: Uuid,
+        visited: &mut HashSet<Uuid>,
+        rec_stack: &mut HashSet<Uuid>,
+    ) -> Result<bool> {
         visited.insert(task_id);
         rec_stack.insert(task_id);
 
-        let task = self.tasks.iter().find(|t| t.id == task_id)
-            .ok_or_else(|| OrchestratorError::validation("Task not found during cycle detection"))?;
+        let task = self.tasks.iter().find(|t| t.id == task_id).ok_or_else(|| {
+            OrchestratorError::validation("Task not found during cycle detection")
+        })?;
 
         for &dep_id in &task.depends_on {
             if !visited.contains(&dep_id) {
@@ -271,7 +290,7 @@ impl Project {
 
         if result.len() != self.tasks.len() {
             return Err(OrchestratorError::validation(
-                "Cannot create execution order due to circular dependencies"
+                "Cannot create execution order due to circular dependencies",
             ));
         }
 
@@ -284,9 +303,10 @@ impl Project {
         let task_ids: HashSet<Uuid> = self.tasks.iter().map(|t| t.id).collect();
         for dep_id in &task.depends_on {
             if !task_ids.contains(dep_id) {
-                return Err(OrchestratorError::validation(
-                    format!("Cannot add task: dependency {} does not exist", dep_id)
-                ));
+                return Err(OrchestratorError::validation(format!(
+                    "Cannot add task: dependency {} does not exist",
+                    dep_id
+                )));
             }
         }
 
@@ -302,19 +322,25 @@ impl Project {
     /// Remove a task from the project
     pub fn remove_task(&mut self, task_id: Uuid) -> Result<Task> {
         // Check if any other tasks depend on this one
-        let dependents: Vec<&Task> = self.tasks
+        let dependents: Vec<&Task> = self
+            .tasks
             .iter()
             .filter(|task| task.depends_on.contains(&task_id))
             .collect();
 
         if !dependents.is_empty() {
-            let dependent_titles: Vec<String> = dependents.iter().map(|t| t.title.clone()).collect();
-            return Err(OrchestratorError::validation(
-                format!("Cannot remove task: it is a dependency for tasks: {}", dependent_titles.join(", "))
-            ));
+            let dependent_titles: Vec<String> =
+                dependents.iter().map(|t| t.title.clone()).collect();
+            return Err(OrchestratorError::validation(format!(
+                "Cannot remove task: it is a dependency for tasks: {}",
+                dependent_titles.join(", ")
+            )));
         }
 
-        let position = self.tasks.iter().position(|t| t.id == task_id)
+        let position = self
+            .tasks
+            .iter()
+            .position(|t| t.id == task_id)
             .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
 
         let removed_task = self.tasks.remove(position);
@@ -326,7 +352,9 @@ impl Project {
     /// Add a dependency between two tasks
     pub fn add_dependency(&mut self, task_id: Uuid, depends_on_id: Uuid) -> Result<()> {
         if task_id == depends_on_id {
-            return Err(OrchestratorError::validation("Task cannot depend on itself"));
+            return Err(OrchestratorError::validation(
+                "Task cannot depend on itself",
+            ));
         }
 
         // Check if dependency exists
@@ -335,7 +363,10 @@ impl Project {
         }
 
         // Find the task and check if dependency already exists
-        let task = self.tasks.iter_mut().find(|t| t.id == task_id)
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == task_id)
             .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
 
         if task.depends_on.contains(&depends_on_id) {
@@ -353,10 +384,16 @@ impl Project {
 
     /// Remove a dependency between two tasks
     pub fn remove_dependency(&mut self, task_id: Uuid, depends_on_id: Uuid) -> Result<()> {
-        let task = self.tasks.iter_mut().find(|t| t.id == task_id)
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == task_id)
             .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
 
-        let position = task.depends_on.iter().position(|&id| id == depends_on_id)
+        let position = task
+            .depends_on
+            .iter()
+            .position(|&id| id == depends_on_id)
             .ok_or_else(|| OrchestratorError::validation("Dependency not found"))?;
 
         task.depends_on.remove(position);
@@ -371,7 +408,8 @@ impl Project {
             return 100.0;
         }
 
-        let completed_count = self.tasks
+        let completed_count = self
+            .tasks
             .iter()
             .filter(|task| task.status == TaskStatus::Completed)
             .count();
@@ -381,8 +419,11 @@ impl Project {
 
     /// Check if project can be marked as completed
     pub fn can_complete(&self) -> bool {
-        !self.tasks.is_empty() &&
-        self.tasks.iter().all(|task| task.status == TaskStatus::Completed)
+        !self.tasks.is_empty()
+            && self
+                .tasks
+                .iter()
+                .all(|task| task.status == TaskStatus::Completed)
     }
 
     /// Auto-transition project status based on task states
@@ -398,15 +439,18 @@ impl Project {
                 // (check for independent tasks or tasks with completed dependencies)
                 if !self.tasks.is_empty() {
                     let has_executable_tasks = self.tasks.iter().any(|task| {
-                        !matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled) &&
-                        (task.depends_on.is_empty() || {
-                            let completed_task_ids: HashSet<Uuid> = self.tasks
-                                .iter()
-                                .filter(|t| t.status == TaskStatus::Completed)
-                                .map(|t| t.id)
-                                .collect();
-                            task.depends_on.iter().all(|dep_id| completed_task_ids.contains(dep_id))
-                        })
+                        !matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled)
+                            && (task.depends_on.is_empty() || {
+                                let completed_task_ids: HashSet<Uuid> = self
+                                    .tasks
+                                    .iter()
+                                    .filter(|t| t.status == TaskStatus::Completed)
+                                    .map(|t| t.id)
+                                    .collect();
+                                task.depends_on
+                                    .iter()
+                                    .all(|dep_id| completed_task_ids.contains(dep_id))
+                            })
                     });
 
                     if has_executable_tasks {
@@ -423,25 +467,51 @@ impl Project {
     /// Get project statistics
     pub fn get_statistics(&self) -> ProjectStatistics {
         let total_tasks = self.tasks.len();
-        let completed_tasks = self.tasks.iter().filter(|t| t.status == TaskStatus::Completed).count();
-        let in_progress_tasks = self.tasks.iter().filter(|t| t.status == TaskStatus::InProgress).count();
+        let completed_tasks = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Completed)
+            .count();
+        let in_progress_tasks = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::InProgress)
+            .count();
         let blocked_tasks = self.get_blocked_tasks().len();
         let ready_tasks = self.get_ready_tasks().len();
-        let unassigned_tasks = self.tasks.iter().filter(|t| t.assigned_to.is_none()).count();
+        let unassigned_tasks = self
+            .tasks
+            .iter()
+            .filter(|t| t.assigned_to.is_none())
+            .count();
 
         let total_issues = self.issues.len();
         let open_issues = self.get_open_issues().len();
-        let critical_issues = self.issues.iter()
-            .filter(|i| i.is_active() &&
-                    i.labels.contains(&"critical".to_string()))
+        let unsynced_issues = self.get_unsynced_issues().len();
+        let critical_issues = self
+            .issues
+            .iter()
+            .filter(|i| i.is_active() && i.labels.contains(&"critical".to_string()))
             .count();
 
         let total_agents = self.agents.len();
         let available_agents = self.get_available_agents().len();
         let working_agents = self.get_working_agents().len();
-        let error_agents = self.get_agents_by_status(crate::enums::AgentStatus::Error).len();
+        let error_agents = self
+            .get_agents_by_status(crate::enums::AgentStatus::Error)
+            .len();
 
-        let dependency_urls_count = self.dependencies_urls.as_ref().map(|urls| urls.len()).unwrap_or(0);
+        // Pull request metrics
+        let total_pull_requests = self.get_all_pull_requests().len();
+        let open_pull_requests = self.get_open_pull_requests().len();
+        let merged_pull_requests = self.get_merged_pull_requests().len();
+        let unsynced_pull_requests = self.get_unsynced_pull_requests().len();
+
+        let dependency_urls_count = self
+            .dependencies_urls
+            .as_ref()
+            .map(|urls| urls.len())
+            .unwrap_or(0);
 
         ProjectStatistics {
             total_tasks,
@@ -453,11 +523,16 @@ impl Project {
             completion_percentage: self.completion_percentage(),
             total_issues,
             open_issues,
+            unsynced_issues,
             critical_issues,
             total_agents,
             available_agents,
             working_agents,
             error_agents,
+            total_pull_requests,
+            open_pull_requests,
+            merged_pull_requests,
+            unsynced_pull_requests,
             health_score: self.get_health_score(),
             dependency_urls_count,
         }
@@ -469,7 +544,9 @@ impl Project {
     pub fn add_issue(&mut self, issue: Issue) -> Result<()> {
         // Check if issue ID already exists
         if self.issues.iter().any(|i| i.id == issue.id) {
-            return Err(OrchestratorError::validation("Issue with this ID already exists"));
+            return Err(OrchestratorError::validation(
+                "Issue with this ID already exists",
+            ));
         }
 
         self.issues.push(issue);
@@ -479,7 +556,10 @@ impl Project {
 
     /// Remove an issue from the project
     pub fn remove_issue(&mut self, issue_id: Uuid) -> Result<Issue> {
-        let position = self.issues.iter().position(|i| i.id == issue_id)
+        let position = self
+            .issues
+            .iter()
+            .position(|i| i.id == issue_id)
             .ok_or_else(|| OrchestratorError::validation("Issue not found"))?;
 
         let removed_issue = self.issues.remove(position);
@@ -507,13 +587,28 @@ impl Project {
         self.issues.iter().filter(|i| !i.is_active()).collect()
     }
 
+    /// Get all unsynced issues
+    pub fn get_unsynced_issues(&self) -> Vec<&Issue> {
+        self.issues.iter().filter(|i| i.needs_sync()).collect()
+    }
+
+    /// Mark all issues as synced
+    pub fn mark_all_issues_synced(&mut self) {
+        for issue in &mut self.issues {
+            issue.mark_synced();
+        }
+        self.updated_at = Utc::now();
+    }
+
     // ===== AGENT MANAGEMENT =====
 
     /// Add an agent to the project
     pub fn add_agent(&mut self, agent: Agent) -> Result<()> {
         // Check if agent ID already exists
         if self.agents.iter().any(|a| a.id == agent.id) {
-            return Err(OrchestratorError::validation("Agent with this ID already exists"));
+            return Err(OrchestratorError::validation(
+                "Agent with this ID already exists",
+            ));
         }
 
         self.agents.push(agent);
@@ -524,19 +619,24 @@ impl Project {
     /// Remove an agent from the project
     pub fn remove_agent(&mut self, agent_id: Uuid) -> Result<Agent> {
         // Check if agent is assigned to any tasks
-        let assigned_tasks: Vec<&Task> = self.tasks
+        let assigned_tasks: Vec<&Task> = self
+            .tasks
             .iter()
             .filter(|task| task.assigned_to.as_ref().map(|a| a.id) == Some(agent_id))
             .collect();
 
         if !assigned_tasks.is_empty() {
             let task_titles: Vec<String> = assigned_tasks.iter().map(|t| t.title.clone()).collect();
-            return Err(OrchestratorError::validation(
-                format!("Cannot remove agent: assigned to tasks: {}", task_titles.join(", "))
-            ));
+            return Err(OrchestratorError::validation(format!(
+                "Cannot remove agent: assigned to tasks: {}",
+                task_titles.join(", ")
+            )));
         }
 
-        let position = self.agents.iter().position(|a| a.id == agent_id)
+        let position = self
+            .agents
+            .iter()
+            .position(|a| a.id == agent_id)
             .ok_or_else(|| OrchestratorError::validation("Agent not found"))?;
 
         let removed_agent = self.agents.remove(position);
@@ -556,12 +656,18 @@ impl Project {
 
     /// Get all available agents (idle or active)
     pub fn get_available_agents(&self) -> Vec<&Agent> {
-        self.agents.iter().filter(|a| a.status.is_available()).collect()
+        self.agents
+            .iter()
+            .filter(|a| a.status.is_available())
+            .collect()
     }
 
     /// Get all working agents (working or busy)
     pub fn get_working_agents(&self) -> Vec<&Agent> {
-        self.agents.iter().filter(|a| a.status.is_working()).collect()
+        self.agents
+            .iter()
+            .filter(|a| a.status.is_working())
+            .collect()
     }
 
     /// Get agents by status
@@ -574,32 +680,44 @@ impl Project {
     /// Assign a task to an agent
     pub fn assign_task_to_agent(&mut self, task_id: Uuid, agent_id: Uuid) -> Result<()> {
         // Find the agent and clone it
-        let agent = self.agents.iter().find(|a| a.id == agent_id)
+        let agent = self
+            .agents
+            .iter()
+            .find(|a| a.id == agent_id)
             .ok_or_else(|| OrchestratorError::validation("Agent not found"))?
             .clone();
 
         // Check if agent is available
         if !agent.status.is_available() {
-            return Err(OrchestratorError::validation(
-                format!("Agent '{}' is not available (status: {:?})", agent.name, agent.status)
-            ));
+            return Err(OrchestratorError::validation(format!(
+                "Agent '{}' is not available (status: {:?})",
+                agent.name, agent.status
+            )));
         }
 
         // Check if task is ready (dependencies completed) before finding the task
         let ready_task_ids: HashSet<Uuid> = self.get_ready_tasks().iter().map(|t| t.id).collect();
-        let independent_task_ids: HashSet<Uuid> = self.get_independent_tasks().iter().map(|t| t.id).collect();
+        let independent_task_ids: HashSet<Uuid> =
+            self.get_independent_tasks().iter().map(|t| t.id).collect();
 
         if !ready_task_ids.contains(&task_id) && !independent_task_ids.contains(&task_id) {
-            return Err(OrchestratorError::validation("Task is not ready for assignment (dependencies not completed)"));
+            return Err(OrchestratorError::validation(
+                "Task is not ready for assignment (dependencies not completed)",
+            ));
         }
 
         // Find the task
-        let task = self.tasks.iter_mut().find(|t| t.id == task_id)
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == task_id)
             .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
 
         // Check if task is already assigned
         if task.assigned_to.is_some() {
-            return Err(OrchestratorError::validation("Task is already assigned to an agent"));
+            return Err(OrchestratorError::validation(
+                "Task is already assigned to an agent",
+            ));
         }
 
         // Assign the agent to the task
@@ -611,11 +729,16 @@ impl Project {
 
     /// Unassign a task from its current agent
     pub fn unassign_task(&mut self, task_id: Uuid) -> Result<()> {
-        let task = self.tasks.iter_mut().find(|t| t.id == task_id)
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == task_id)
             .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
 
         if task.assigned_to.is_none() {
-            return Err(OrchestratorError::validation("Task is not assigned to any agent"));
+            return Err(OrchestratorError::validation(
+                "Task is not assigned to any agent",
+            ));
         }
 
         task.assigned_to = None;
@@ -627,7 +750,10 @@ impl Project {
     /// Reassign a task from one agent to another
     pub fn reassign_task(&mut self, task_id: Uuid, new_agent_id: Uuid) -> Result<()> {
         // Only unassign if the task is currently assigned
-        let task = self.tasks.iter().find(|t| t.id == task_id)
+        let task = self
+            .tasks
+            .iter()
+            .find(|t| t.id == task_id)
             .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
 
         if task.assigned_to.is_some() {
@@ -657,12 +783,14 @@ impl Project {
     /// Auto-assign ready tasks to available agents (simple round-robin)
     pub fn auto_assign_tasks(&mut self) -> Result<Vec<(Uuid, Uuid)>> {
         let mut assignments = Vec::new();
-        let unassigned_tasks: Vec<Uuid> = self.get_unassigned_ready_tasks()
+        let unassigned_tasks: Vec<Uuid> = self
+            .get_unassigned_ready_tasks()
             .into_iter()
             .map(|t| t.id)
             .collect();
 
-        let available_agents: Vec<Uuid> = self.get_available_agents()
+        let available_agents: Vec<Uuid> = self
+            .get_available_agents()
             .into_iter()
             .map(|a| a.id)
             .collect();
@@ -703,7 +831,9 @@ impl Project {
 
         // Check if URL already exists
         if urls.contains(&url_string) {
-            return Err(OrchestratorError::validation("Dependency URL already exists"));
+            return Err(OrchestratorError::validation(
+                "Dependency URL already exists",
+            ));
         }
 
         urls.push(url_string);
@@ -714,10 +844,14 @@ impl Project {
 
     /// Remove a dependency URL from the project
     pub fn remove_dependency_url(&mut self, url: &str) -> Result<()> {
-        let urls = self.dependencies_urls.as_mut()
+        let urls = self
+            .dependencies_urls
+            .as_mut()
             .ok_or_else(|| OrchestratorError::validation("No dependency URLs configured"))?;
 
-        let position = urls.iter().position(|u| u == url)
+        let position = urls
+            .iter()
+            .position(|u| u == url)
             .ok_or_else(|| OrchestratorError::validation("Dependency URL not found"))?;
 
         urls.remove(position);
@@ -736,9 +870,10 @@ impl Project {
         // Validate all URLs
         for url in &urls {
             if !url.starts_with("http://") && !url.starts_with("https://") {
-                return Err(OrchestratorError::validation(
-                    format!("Invalid URL format: {}", url)
-                ));
+                return Err(OrchestratorError::validation(format!(
+                    "Invalid URL format: {}",
+                    url
+                )));
             }
         }
 
@@ -746,9 +881,10 @@ impl Project {
         let mut unique_urls = HashSet::new();
         for url in &urls {
             if !unique_urls.insert(url) {
-                return Err(OrchestratorError::validation(
-                    format!("Duplicate URL found: {}", url)
-                ));
+                return Err(OrchestratorError::validation(format!(
+                    "Duplicate URL found: {}",
+                    url
+                )));
             }
         }
 
@@ -760,14 +896,16 @@ impl Project {
 
     /// Get all dependency URLs
     pub fn get_dependency_urls(&self) -> Vec<&String> {
-        self.dependencies_urls.as_ref()
+        self.dependencies_urls
+            .as_ref()
             .map(|urls| urls.iter().collect())
             .unwrap_or_default()
     }
 
     /// Check if a dependency URL exists
     pub fn has_dependency_url(&self, url: &str) -> bool {
-        self.dependencies_urls.as_ref()
+        self.dependencies_urls
+            .as_ref()
             .map(|urls| urls.contains(&url.to_string()))
             .unwrap_or(false)
     }
@@ -806,11 +944,10 @@ impl Project {
     pub fn get_most_loaded_agent(&self) -> Option<(&Agent, usize)> {
         let distribution = self.get_workload_distribution();
 
-        distribution.iter()
+        distribution
+            .iter()
             .max_by_key(|(_, count)| *count)
-            .and_then(|(agent_id, count)| {
-                self.get_agent(*agent_id).map(|agent| (agent, *count))
-            })
+            .and_then(|(agent_id, count)| self.get_agent(*agent_id).map(|agent| (agent, *count)))
     }
 
     /// Get the least loaded agent (agent with fewest assigned tasks)
@@ -834,10 +971,9 @@ impl Project {
 
     /// Check if the project has any critical issues (issues labeled as critical)
     pub fn has_critical_issues(&self) -> bool {
-        self.issues.iter().any(|issue| {
-            issue.is_active() &&
-            issue.labels.contains(&"critical".to_string())
-        })
+        self.issues
+            .iter()
+            .any(|issue| issue.is_active() && issue.labels.contains(&"critical".to_string()))
     }
 
     /// Get project health score (0-100 based on various metrics)
@@ -858,7 +994,9 @@ impl Project {
         }
 
         // Deduct points for agents in error state
-        let error_agents = self.get_agents_by_status(crate::enums::AgentStatus::Error).len();
+        let error_agents = self
+            .get_agents_by_status(crate::enums::AgentStatus::Error)
+            .len();
         if !self.agents.is_empty() {
             let error_ratio = error_agents as f64 / self.agents.len() as f64;
             score -= error_ratio * 25.0;
@@ -881,13 +1019,13 @@ impl Project {
 
     // ===== COMMENT MANAGEMENT =====
 
-    /// Get all comments from all tasks and issues
+    /// Get all comments from all tasks, issues, and pull requests
     pub fn get_all_comments(&self) -> Vec<&Comment> {
         let mut comments = Vec::new();
 
         // Collect task comments
         for task in &self.tasks {
-            comments.extend(task.comments.iter());
+            comments.extend(task.get_all_comments());
         }
 
         // Collect issue comments
@@ -926,6 +1064,10 @@ impl Project {
     pub fn mark_all_comments_synced(&mut self) {
         for task in &mut self.tasks {
             task.mark_all_comments_synced();
+            // Also mark PR comments as synced
+            if let Some(pr) = &mut task.pull_request {
+                pr.mark_all_comments_synced();
+            }
         }
 
         for issue in &mut self.issues {
@@ -935,15 +1077,84 @@ impl Project {
         self.updated_at = Utc::now();
     }
 
+    /// Mark everything as synced (issues, pull requests, and all comments)
+    pub fn mark_all_synced(&mut self) {
+        self.mark_all_issues_synced();
+        self.mark_all_pull_requests_synced();
+        self.mark_all_comments_synced();
+        self.updated_at = Utc::now();
+    }
+
+    // ===== PULL REQUEST MANAGEMENT =====
+
+    /// Get all pull requests from tasks
+    pub fn get_all_pull_requests(&self) -> Vec<&PullRequest> {
+        self.tasks
+            .iter()
+            .filter_map(|task| task.pull_request.as_ref())
+            .collect()
+    }
+
+    /// Get all unsynced pull requests
+    pub fn get_unsynced_pull_requests(&self) -> Vec<&PullRequest> {
+        self.get_all_pull_requests()
+            .into_iter()
+            .filter(|pr| pr.needs_sync())
+            .collect()
+    }
+
+    /// Mark all pull requests as synced
+    pub fn mark_all_pull_requests_synced(&mut self) {
+        for task in &mut self.tasks {
+            if let Some(pr) = &mut task.pull_request {
+                pr.mark_synced();
+            }
+        }
+        self.updated_at = Utc::now();
+    }
+
+    /// Get pull requests by status
+    pub fn get_pull_requests_by_status(&self, status: CodeStatus) -> Vec<&PullRequest> {
+        self.get_all_pull_requests()
+            .into_iter()
+            .filter(|pr| pr.code_status == status)
+            .collect()
+    }
+
+    /// Get open pull requests
+    pub fn get_open_pull_requests(&self) -> Vec<&PullRequest> {
+        self.get_all_pull_requests()
+            .into_iter()
+            .filter(|pr| pr.is_open())
+            .collect()
+    }
+
+    /// Get merged pull requests
+    pub fn get_merged_pull_requests(&self) -> Vec<&PullRequest> {
+        self.get_all_pull_requests()
+            .into_iter()
+            .filter(|pr| pr.is_merged())
+            .collect()
+    }
+
     /// Get comment statistics
     pub fn get_comment_statistics(&self) -> CommentStatistics {
         let all_comments = self.get_all_comments();
         let total_comments = all_comments.len();
         let unsynced_comments = all_comments.iter().filter(|c| c.needs_sync()).count();
 
-        let task_comments = all_comments.iter().filter(|c| c.comment_type == CommentType::Task).count();
-        let issue_comments = all_comments.iter().filter(|c| c.comment_type == CommentType::Issue).count();
-        let pr_comments = all_comments.iter().filter(|c| c.comment_type == CommentType::PullRequest).count();
+        let task_comments = all_comments
+            .iter()
+            .filter(|c| c.comment_type == CommentType::Task)
+            .count();
+        let issue_comments = all_comments
+            .iter()
+            .filter(|c| c.comment_type == CommentType::Issue)
+            .count();
+        let pr_comments = all_comments
+            .iter()
+            .filter(|c| c.comment_type == CommentType::PullRequest)
+            .count();
 
         CommentStatistics {
             total_comments,
@@ -979,7 +1190,11 @@ impl Project {
     }
 
     /// Update a comment anywhere in the project
-    pub fn update_comment_anywhere(&mut self, comment_id: Uuid, new_content: impl Into<String>) -> Result<()> {
+    pub fn update_comment_anywhere(
+        &mut self,
+        comment_id: Uuid,
+        new_content: impl Into<String>,
+    ) -> Result<()> {
         // Try to find and update in tasks
         for task in &mut self.tasks {
             if task.get_comment(comment_id).is_some() {
@@ -994,7 +1209,9 @@ impl Project {
             }
         }
 
-        Err(OrchestratorError::validation("Comment not found in project"))
+        Err(OrchestratorError::validation(
+            "Comment not found in project",
+        ))
     }
 }
 
@@ -1009,11 +1226,16 @@ pub struct ProjectStatistics {
     pub completion_percentage: f64,
     pub total_issues: usize,
     pub open_issues: usize,
+    pub unsynced_issues: usize,
     pub critical_issues: usize,
     pub total_agents: usize,
     pub available_agents: usize,
     pub working_agents: usize,
     pub error_agents: usize,
+    pub total_pull_requests: usize,
+    pub open_pull_requests: usize,
+    pub merged_pull_requests: usize,
+    pub unsynced_pull_requests: usize,
     pub health_score: f64,
     pub dependency_urls_count: usize,
 }
@@ -1030,7 +1252,7 @@ pub struct CommentStatistics {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommentLocation {
-    Task(usize, Uuid), // (index, task_id)
+    Task(usize, Uuid),  // (index, task_id)
     Issue(usize, Uuid), // (index, issue_id)
 }
 
@@ -1320,7 +1542,11 @@ mod tests {
     // ===== AGENT MANAGEMENT TESTS =====
 
     fn create_test_agent(name: &str) -> Agent {
-        Agent::new(name, std::path::PathBuf::from("/tmp/test.json"), "Test agent")
+        Agent::new(
+            name,
+            std::path::PathBuf::from("/tmp/test.json"),
+            "Test agent",
+        )
     }
 
     #[test]
@@ -1411,7 +1637,11 @@ mod tests {
         let task2 = create_test_task("Task 2", vec![]);
         let task2_id = task2.id;
         project.add_task(task2).unwrap();
-        assert!(project.assign_task_to_agent(task2_id, fake_agent_id).is_err());
+        assert!(
+            project
+                .assign_task_to_agent(task2_id, fake_agent_id)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1479,8 +1709,16 @@ mod tests {
         let mut project = Project::new("Test", "https://github.com/test");
 
         // Add URLs
-        assert!(project.add_dependency_url("https://example.com/dep1").is_ok());
-        assert!(project.add_dependency_url("https://example.com/dep2").is_ok());
+        assert!(
+            project
+                .add_dependency_url("https://example.com/dep1")
+                .is_ok()
+        );
+        assert!(
+            project
+                .add_dependency_url("https://example.com/dep2")
+                .is_ok()
+        );
 
         // Check URLs exist
         assert!(project.has_dependency_url("https://example.com/dep1"));
@@ -1491,7 +1729,11 @@ mod tests {
         assert_eq!(urls.len(), 2);
 
         // Remove URL
-        assert!(project.remove_dependency_url("https://example.com/dep1").is_ok());
+        assert!(
+            project
+                .remove_dependency_url("https://example.com/dep1")
+                .is_ok()
+        );
         assert!(!project.has_dependency_url("https://example.com/dep1"));
         assert_eq!(project.get_dependency_urls().len(), 1);
     }
@@ -1633,8 +1875,12 @@ mod tests {
         project.add_issue(issue).unwrap();
 
         // Add dependency URLs
-        project.add_dependency_url("https://example.com/dep1").unwrap();
-        project.add_dependency_url("https://example.com/dep2").unwrap();
+        project
+            .add_dependency_url("https://example.com/dep1")
+            .unwrap();
+        project
+            .add_dependency_url("https://example.com/dep2")
+            .unwrap();
 
         let stats = project.get_statistics();
 
@@ -1741,11 +1987,233 @@ mod tests {
         assert!(matches!(location, CommentLocation::Task(_, _)));
 
         // Update comment
-        project.update_comment_anywhere(comment_id, "Updated content").unwrap();
+        project
+            .update_comment_anywhere(comment_id, "Updated content")
+            .unwrap();
 
         // Verify update
         let (updated_comment, _) = project.find_comment(comment_id).unwrap();
         assert_eq!(updated_comment.content, "Updated content");
         assert!(updated_comment.needs_sync()); // Should be marked as unsynced
+    }
+
+    // ===== ISSUE SYNC TESTS =====
+
+    #[test]
+    fn test_issue_sync_management() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        // Add issues
+        let issue1 = create_test_issue("Issue 1");
+        let mut issue2 = create_test_issue("Issue 2");
+
+        // Mark one as synced
+        issue2.mark_synced();
+
+        project.add_issue(issue1).unwrap();
+        project.add_issue(issue2).unwrap();
+
+        // Test unsynced issues
+        let unsynced = project.get_unsynced_issues();
+        assert_eq!(unsynced.len(), 1);
+        assert_eq!(unsynced[0].title, "Issue 1");
+
+        // Mark all as synced
+        project.mark_all_issues_synced();
+        assert_eq!(project.get_unsynced_issues().len(), 0);
+    }
+
+    #[test]
+    fn test_issue_modification_unsyncs() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        let mut issue = create_test_issue("Test Issue");
+        issue.mark_synced(); // Start as synced
+        project.add_issue(issue).unwrap();
+
+        let issue_id = project.issues[0].id;
+        let issue = project.get_issue_mut(issue_id).unwrap();
+
+        // Test various modifications unsync the issue
+        assert!(!issue.needs_sync()); // Initially synced
+
+        issue.update_title("New Title");
+        assert!(issue.needs_sync());
+
+        issue.mark_synced();
+        issue.update_body("New Body");
+        assert!(issue.needs_sync());
+
+        issue.mark_synced();
+        issue.update_assignee(Some("new_assignee".to_string()));
+        assert!(issue.needs_sync());
+
+        issue.mark_synced();
+        issue.add_label("new_label");
+        assert!(issue.needs_sync());
+
+        issue.mark_synced();
+        issue.remove_label("new_label");
+        assert!(issue.needs_sync());
+
+        issue.mark_synced();
+        issue.set_github_issue_number(123);
+        assert!(issue.needs_sync());
+    }
+
+    #[test]
+    fn test_issue_status_change_unsyncs() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        let mut issue = create_test_issue("Test Issue");
+        issue.mark_synced();
+        project.add_issue(issue).unwrap();
+
+        let issue_id = project.issues[0].id;
+        let issue = project.get_issue_mut(issue_id).unwrap();
+
+        assert!(!issue.needs_sync()); // Initially synced
+
+        // Assign the issue first
+        issue.assignee = Some("user".to_string());
+
+        // Status change should unsync
+        issue
+            .progress("user", Some("Starting work".to_string()))
+            .unwrap();
+        assert!(issue.needs_sync());
+    }
+
+    #[test]
+    fn test_project_statistics_with_issue_sync() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        // Add synced and unsynced issues
+        let mut issue1 = create_test_issue("Synced Issue");
+        issue1.mark_synced();
+        let issue2 = create_test_issue("Unsynced Issue");
+
+        project.add_issue(issue1).unwrap();
+        project.add_issue(issue2).unwrap();
+
+        let stats = project.get_statistics();
+        assert_eq!(stats.total_issues, 2);
+        assert_eq!(stats.unsynced_issues, 1);
+    }
+
+    #[test]
+    fn test_project_mark_all_synced() {
+        let mut project = Project::new("Test", "https://github.com/test");
+
+        // Add unsynced issue and task with comments
+        let mut issue = create_test_issue("Unsynced Issue");
+        issue.add_new_comment("user", "Unsynced comment");
+        project.add_issue(issue).unwrap();
+
+        let mut task = create_test_task("Unsynced Task", vec![]);
+        task.add_comment("user", "Unsynced comment");
+        project.add_task(task).unwrap();
+
+        // Initially everything should be unsynced
+        assert_eq!(project.get_unsynced_issues().len(), 1);
+        assert_eq!(project.get_all_unsynced_comments().len(), 2);
+
+        // Mark everything as synced
+        project.mark_all_synced();
+
+        // Now everything should be synced
+        assert_eq!(project.get_unsynced_issues().len(), 0);
+        assert_eq!(project.get_all_unsynced_comments().len(), 0);
+    }
+
+    // ===== PULL REQUEST TESTS =====
+
+    #[test]
+    fn test_project_pull_request_management() {
+        let mut project = Project::new("Test", "https://github.com/test");
+        project.transition_to(ProjectStatus::Active).unwrap();
+
+        // Create task with pull request
+        let mut task = create_test_task("Task with PR", vec![]);
+        let agent = create_test_agent("Agent 1");
+        task.assigned_to = Some(agent);
+        task.transition_task_status(TaskStatus::InProgress).unwrap();
+        task.transition_code_status(CodeStatus::Coded).unwrap();
+        task.create_pull_request("Fix: Task", "Description", "feature/task", "main", "dev")
+            .unwrap();
+
+        project.add_task(task).unwrap();
+
+        // Test PR retrieval
+        let all_prs = project.get_all_pull_requests();
+        assert_eq!(all_prs.len(), 1);
+
+        let open_prs = project.get_open_pull_requests();
+        assert_eq!(open_prs.len(), 1);
+
+        let unsynced_prs = project.get_unsynced_pull_requests();
+        assert_eq!(unsynced_prs.len(), 1);
+
+        // Mark all PRs as synced
+        project.mark_all_pull_requests_synced();
+        assert_eq!(project.get_unsynced_pull_requests().len(), 0);
+    }
+
+    #[test]
+    fn test_project_statistics_with_pull_requests() {
+        let mut project = Project::new("Test", "https://github.com/test");
+        project.transition_to(ProjectStatus::Active).unwrap();
+
+        // Create task with pull request
+        let mut task = create_test_task("Task with PR", vec![]);
+        let agent = create_test_agent("Agent 1");
+        task.assigned_to = Some(agent);
+        task.transition_task_status(TaskStatus::InProgress).unwrap();
+        task.transition_code_status(CodeStatus::Coded).unwrap();
+        task.create_pull_request("Fix: Task", "Description", "feature/task", "main", "dev")
+            .unwrap();
+
+        project.add_task(task).unwrap();
+
+        let stats = project.get_statistics();
+        assert_eq!(stats.total_pull_requests, 1);
+        assert_eq!(stats.open_pull_requests, 1);
+        assert_eq!(stats.merged_pull_requests, 0);
+        assert_eq!(stats.unsynced_pull_requests, 1);
+    }
+
+    #[test]
+    fn test_project_mark_all_synced_with_prs() {
+        let mut project = Project::new("Test", "https://github.com/test");
+        project.transition_to(ProjectStatus::Active).unwrap();
+
+        // Create task with pull request and comments
+        let mut task = create_test_task("Task with PR", vec![]);
+        let agent = create_test_agent("Agent 1");
+        task.assigned_to = Some(agent);
+        task.transition_task_status(TaskStatus::InProgress).unwrap();
+        task.transition_code_status(CodeStatus::Coded).unwrap();
+        task.create_pull_request("Fix: Task", "Description", "feature/task", "main", "dev")
+            .unwrap();
+        task.add_pr_comment("user", "Great work!").unwrap();
+
+        project.add_task(task).unwrap();
+
+        // Add unsynced issue
+        let issue = create_test_issue("Unsynced Issue");
+        project.add_issue(issue).unwrap();
+
+        // Initially everything should be unsynced
+        assert_eq!(project.get_unsynced_pull_requests().len(), 1);
+        assert_eq!(project.get_unsynced_issues().len(), 1);
+        assert_eq!(project.get_all_unsynced_comments().len(), 1);
+
+        // Mark everything as synced
+        project.mark_all_synced();
+
+        // Now everything should be synced
+        assert_eq!(project.get_unsynced_pull_requests().len(), 0);
+        assert_eq!(project.get_unsynced_issues().len(), 0);
+        assert_eq!(project.get_all_unsynced_comments().len(), 0);
     }
 }

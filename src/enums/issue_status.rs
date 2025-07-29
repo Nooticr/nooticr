@@ -1,5 +1,5 @@
+use crate::error::{OrchestratorError, Result};
 use serde::{Deserialize, Serialize};
-use crate::error::{Result, OrchestratorError};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr;
 
@@ -19,7 +19,7 @@ impl Display for IssueStatus {
 }
 
 impl FromStr for IssueStatus {
-    type Err = String;  // You can define a custom error type if needed
+    type Err = String; // You can define a custom error type if needed
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
@@ -41,24 +41,21 @@ impl IssueStatus {
             (IssueStatus::Open, IssueStatus::InProgress) => Ok(next),
             (IssueStatus::InProgress, IssueStatus::InReview) => Ok(next),
             (IssueStatus::InReview, IssueStatus::Closed) => Ok(next),
-            
+
             // Can go back from InReview to InProgress (for rework)
             (IssueStatus::InReview, IssueStatus::InProgress) => Ok(next),
-            
+
             // Can reopen closed issues
             (IssueStatus::Closed, IssueStatus::Open) => Ok(next),
-            
+
             // Direct close from Open (for invalid/duplicate issues)
             (IssueStatus::Open, IssueStatus::Closed) => Ok(next),
-            
+
             // Invalid transitions
-            _ => Err(OrchestratorError::issue_transition(
-                self.clone(),
-                next,
-            )),
+            _ => Err(OrchestratorError::issue_transition(self.clone(), next)),
         }
     }
-    
+
     /// Get valid next states from current state
     pub fn valid_transitions(&self) -> Vec<IssueStatus> {
         match self {
@@ -68,7 +65,7 @@ impl IssueStatus {
             IssueStatus::Closed => vec![IssueStatus::Open],
         }
     }
-    
+
     /// Attempt to progress to the next state in the normal workflow
     pub fn progress(&self) -> Result<IssueStatus> {
         match self {
@@ -110,9 +107,18 @@ mod tests {
     #[test]
     fn test_issue_status_from_str() {
         assert_eq!("Open".parse::<IssueStatus>().unwrap(), IssueStatus::Open);
-        assert_eq!("InProgress".parse::<IssueStatus>().unwrap(), IssueStatus::InProgress);
-        assert_eq!("InReview".parse::<IssueStatus>().unwrap(), IssueStatus::InReview);
-        assert_eq!("Closed".parse::<IssueStatus>().unwrap(), IssueStatus::Closed);
+        assert_eq!(
+            "InProgress".parse::<IssueStatus>().unwrap(),
+            IssueStatus::InProgress
+        );
+        assert_eq!(
+            "InReview".parse::<IssueStatus>().unwrap(),
+            IssueStatus::InReview
+        );
+        assert_eq!(
+            "Closed".parse::<IssueStatus>().unwrap(),
+            IssueStatus::Closed
+        );
 
         assert!("Invalid".parse::<IssueStatus>().is_err());
     }
@@ -122,23 +128,38 @@ mod tests {
         let mut status = IssueStatus::Open;
 
         // Open -> InProgress
-        status = status.transition_to(IssueStatus::InProgress).expect("Should transition to InProgress");
+        status = status
+            .transition_to(IssueStatus::InProgress)
+            .expect("Should transition to InProgress");
         assert_eq!(status, IssueStatus::InProgress);
 
         // InProgress -> InReview
-        status = status.transition_to(IssueStatus::InReview).expect("Should transition to InReview");
+        status = status
+            .transition_to(IssueStatus::InReview)
+            .expect("Should transition to InReview");
         assert_eq!(status, IssueStatus::InReview);
 
         // InReview -> Closed
-        status = status.transition_to(IssueStatus::Closed).expect("Should transition to Closed");
+        status = status
+            .transition_to(IssueStatus::Closed)
+            .expect("Should transition to Closed");
         assert_eq!(status, IssueStatus::Closed);
     }
 
     #[test]
     fn test_issue_status_progress_method() {
-        assert_eq!(IssueStatus::Open.progress().unwrap(), IssueStatus::InProgress);
-        assert_eq!(IssueStatus::InProgress.progress().unwrap(), IssueStatus::InReview);
-        assert_eq!(IssueStatus::InReview.progress().unwrap(), IssueStatus::Closed);
+        assert_eq!(
+            IssueStatus::Open.progress().unwrap(),
+            IssueStatus::InProgress
+        );
+        assert_eq!(
+            IssueStatus::InProgress.progress().unwrap(),
+            IssueStatus::InReview
+        );
+        assert_eq!(
+            IssueStatus::InReview.progress().unwrap(),
+            IssueStatus::Closed
+        );
 
         // Closed is terminal
         assert!(IssueStatus::Closed.progress().is_err());
@@ -149,44 +170,84 @@ mod tests {
         let mut status = IssueStatus::InReview;
 
         // InReview -> InProgress (for rework)
-        status = status.transition_to(IssueStatus::InProgress).expect("Should transition back to InProgress");
+        status = status
+            .transition_to(IssueStatus::InProgress)
+            .expect("Should transition back to InProgress");
         assert_eq!(status, IssueStatus::InProgress);
 
         // InProgress -> InReview (after rework)
-        status = status.transition_to(IssueStatus::InReview).expect("Should transition to InReview");
+        status = status
+            .transition_to(IssueStatus::InReview)
+            .expect("Should transition to InReview");
         assert_eq!(status, IssueStatus::InReview);
     }
 
     #[test]
     fn test_issue_status_direct_close() {
         // Can close directly from Open (for invalid/duplicate issues)
-        let status = IssueStatus::Open.transition_to(IssueStatus::Closed).expect("Should close directly");
+        let status = IssueStatus::Open
+            .transition_to(IssueStatus::Closed)
+            .expect("Should close directly");
         assert_eq!(status, IssueStatus::Closed);
     }
 
     #[test]
     fn test_issue_status_reopen() {
         // Can reopen closed issues
-        let status = IssueStatus::Closed.transition_to(IssueStatus::Open).expect("Should reopen");
+        let status = IssueStatus::Closed
+            .transition_to(IssueStatus::Open)
+            .expect("Should reopen");
         assert_eq!(status, IssueStatus::Open);
     }
 
     #[test]
     fn test_issue_status_invalid_transitions() {
         // Cannot skip states in normal flow
-        assert!(IssueStatus::Open.transition_to(IssueStatus::InReview).is_err());
-        assert!(IssueStatus::InProgress.transition_to(IssueStatus::Closed).is_err());
+        assert!(
+            IssueStatus::Open
+                .transition_to(IssueStatus::InReview)
+                .is_err()
+        );
+        assert!(
+            IssueStatus::InProgress
+                .transition_to(IssueStatus::Closed)
+                .is_err()
+        );
 
         // Cannot go backwards except for specific cases
-        assert!(IssueStatus::InProgress.transition_to(IssueStatus::Open).is_err());
-        assert!(IssueStatus::Closed.transition_to(IssueStatus::InProgress).is_err());
-        assert!(IssueStatus::Closed.transition_to(IssueStatus::InReview).is_err());
+        assert!(
+            IssueStatus::InProgress
+                .transition_to(IssueStatus::Open)
+                .is_err()
+        );
+        assert!(
+            IssueStatus::Closed
+                .transition_to(IssueStatus::InProgress)
+                .is_err()
+        );
+        assert!(
+            IssueStatus::Closed
+                .transition_to(IssueStatus::InReview)
+                .is_err()
+        );
 
         // Cannot stay in same state
         assert!(IssueStatus::Open.transition_to(IssueStatus::Open).is_err());
-        assert!(IssueStatus::InProgress.transition_to(IssueStatus::InProgress).is_err());
-        assert!(IssueStatus::InReview.transition_to(IssueStatus::InReview).is_err());
-        assert!(IssueStatus::Closed.transition_to(IssueStatus::Closed).is_err());
+        assert!(
+            IssueStatus::InProgress
+                .transition_to(IssueStatus::InProgress)
+                .is_err()
+        );
+        assert!(
+            IssueStatus::InReview
+                .transition_to(IssueStatus::InReview)
+                .is_err()
+        );
+        assert!(
+            IssueStatus::Closed
+                .transition_to(IssueStatus::Closed)
+                .is_err()
+        );
     }
 
     #[test]
