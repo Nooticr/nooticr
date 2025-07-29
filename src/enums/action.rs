@@ -29,6 +29,7 @@ impl Action {
 
                 let mut file = fs::File::create(&file_path).await?;
                 file.write_all(content.as_bytes()).await?;
+                file.flush().await?;
                 debug!("Wrote to {}: {}", path, content);
             }
 
