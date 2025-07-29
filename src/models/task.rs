@@ -1,5 +1,7 @@
 use super::agent::Agent;
-use crate::enums::{CodeStatus, CommentType, Priority, TaskStatus};
+use crate::enums::{CommentType, Priority, TaskStatus};
+#[cfg(test)]
+use crate::enums::CodeStatus;
 use crate::error::{OrchestratorError, Result};
 use crate::models::comment::Comment;
 use crate::models::pull_request::PullRequest;
@@ -7,16 +9,27 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Simplified Task structure for deserializing prompt outputs
+/// This matches the format expected by idea_breakdown_user_prompt
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskInput {
+    pub id: String, // Will be replaced with new UUID
+    pub title: String,
+    pub description: String,
+    pub priority: String, // "High/Medium/Low/Critical" - will be parsed to Priority enum
+    pub complexity: u8, // 1-10 scale
+    pub tags: Vec<String>,
+    pub depends_on: Vec<String>, // Task IDs that will be mapped to UUIDs
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
     pub id: Uuid,
     pub title: String,
     pub status: TaskStatus,
-    pub code_status: CodeStatus,
     pub assigned_to: Option<String>,
     pub priority: Priority,
     pub is_overdue: bool,
-    pub ci_attemps: u32,
     pub comment_count: usize,
 }
 
@@ -27,8 +40,6 @@ pub struct Task {
     pub description: String,
     pub status: TaskStatus,
     pub status_history: Vec<(TaskStatus, chrono::DateTime<chrono::Utc>)>,
-    pub code_status: CodeStatus,
-    pub code_status_history: Vec<(CodeStatus, chrono::DateTime<chrono::Utc>)>,
     pub rapporter: Option<Agent>,
     pub assigned_to: Option<Agent>,
     pub priority: Priority,
@@ -40,7 +51,6 @@ pub struct Task {
     pub due_date: Option<DateTime<Utc>>,
     pub tags: Vec<String>,
     pub comments: Vec<Comment>,
-    pub ci_attemps: u32,
     pub depends_on: Vec<Uuid>,
     pub pull_request: Option<PullRequest>,
 }
@@ -54,7 +64,6 @@ impl Task {
     ) -> Self {
         let now = Utc::now();
         let task_status = TaskStatus::default();
-        let code_status = CodeStatus::default();
 
         Self {
             id: Uuid::new_v4(),
@@ -62,8 +71,6 @@ impl Task {
             description: description.into(),
             status: task_status.clone(),
             status_history: vec![(task_status, now)],
-            code_status,
-            code_status_history: vec![(code_status, now)],
             rapporter: None,
             assigned_to: None,
             priority,
@@ -75,10 +82,169 @@ impl Task {
             due_date: None,
             tags: Vec::new(),
             comments: Vec::new(),
-            ci_attemps: 0,
             depends_on: Vec::new(),
             pull_request: None,
         }
+    }
+
+    /// Parse priority string to Priority enum
+    fn parse_priority(priority_str: &str) -> Priority {
+        match priority_str.to_lowercase().as_str() {
+            "critical" => Priority::Critical,
+            "high" => Priority::High,
+            "medium" => Priority::Medium,
+            "low" => Priority::Low,
+            _ => Priority::Medium, // Default to Medium for unknown values
+        }
+    }
+
+    /// Create a Task from a TaskInput (from prompt output)
+    ///
+    /// This converts the simplified TaskInput structure from idea_breakdown_user_prompt
+    /// into a full Task with proper UUIDs and default values.
+    ///
+    /// # Arguments
+    /// * `input` - The TaskInput from JSON deserialization
+    /// * `id_mapping` - Optional mapping from old string IDs to new UUIDs for dependency resolution
+    pub fn from_input(
+        input: TaskInput,
+        id_mapping: Option<&std::collections::HashMap<String, Uuid>>,
+    ) -> Self {
+        let now = Utc::now();
+        let task_status = TaskStatus::default();
+        let priority = Self::parse_priority(&input.priority);
+
+        // Map dependency IDs to UUIDs if mapping is provided
+        let depends_on = if let Some(mapping) = id_mapping {
+            input.depends_on
+                .iter()
+                .filter_map(|dep_id| mapping.get(dep_id).copied())
+                .collect()
+        } else {
+            Vec::new() // No dependencies if no mapping provided
+        };
+
+        Self {
+            id: Uuid::new_v4(),
+            title: input.title,
+            description: input.description,
+            status: task_status.clone(),
+            status_history: vec![(task_status, now)],
+            rapporter: None,
+            assigned_to: None,
+            priority,
+            estimated_complexity: Some(input.complexity),
+            estimated_duration: None,
+            created_at: Some(now),
+            updated_at: Some(now),
+            completed_at: None,
+            due_date: None,
+            tags: input.tags,
+            comments: Vec::new(),
+            depends_on,
+            pull_request: None,
+        }
+    }
+
+    /// Deserialize a JSON array from idea_breakdown_user_prompt output
+    ///
+    /// This parses the JSON output from the idea breakdown prompt and creates
+    /// a vector of Tasks with proper dependency relationships.
+    ///
+    /// # Example
+    /// ```rust
+    /// use orchy::models::task::Task;
+    ///
+    /// let json = r#"[
+    ///     {
+    ///         "id": "task-1",
+    ///         "title": "Setup Database",
+    ///         "description": "Create database schema",
+    ///         "priority": "High",
+    ///         "complexity": 5,
+    ///         "tags": ["backend", "database"],
+    ///         "depends_on": []
+    ///     },
+    ///     {
+    ///         "id": "task-2",
+    ///         "title": "Create API",
+    ///         "description": "Build REST API",
+    ///         "priority": "Medium",
+    ///         "complexity": 7,
+    ///         "tags": ["backend", "api"],
+    ///         "depends_on": ["task-1"]
+    ///     }
+    /// ]"#;
+    ///
+    /// let tasks = Task::from_json_array(json).unwrap();
+    /// assert_eq!(tasks.len(), 2);
+    /// assert_eq!(tasks[1].depends_on.len(), 1); // task-2 depends on task-1
+    /// ```
+    pub fn from_json_array(json_str: &str) -> std::result::Result<Vec<Self>, serde_json::Error> {
+        let inputs: Vec<TaskInput> = serde_json::from_str(json_str)?;
+
+        // First pass: create ID mapping from old string IDs to new UUIDs
+        let mut id_mapping = std::collections::HashMap::new();
+        for input in &inputs {
+            id_mapping.insert(input.id.clone(), Uuid::new_v4());
+        }
+
+        // Second pass: create tasks with proper dependencies
+        let tasks = inputs
+            .into_iter()
+            .map(|input| {
+                let mut task = Self::from_input(input.clone(), Some(&id_mapping));
+                // Use the pre-generated UUID for this task
+                if let Some(&uuid) = id_mapping.get(&input.id) {
+                    task.id = uuid;
+                }
+                task
+            })
+            .collect();
+
+        Ok(tasks)
+    }
+
+    /// Parse JSON and create tasks with automatic dependency resolution
+    ///
+    /// This is a convenience method that combines JSON parsing with dependency resolution.
+    /// It's particularly useful for processing the output from idea_breakdown_user_prompt.
+    ///
+    /// # Example
+    /// ```rust
+    /// use orchy::models::task::Task;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let json_output = r#"[
+    ///     {
+    ///         "id": "setup",
+    ///         "title": "Project Setup",
+    ///         "description": "Initialize project structure",
+    ///         "priority": "High",
+    ///         "complexity": 3,
+    ///         "tags": ["setup"],
+    ///         "depends_on": []
+    ///     },
+    ///     {
+    ///         "id": "development",
+    ///         "title": "Core Development",
+    ///         "description": "Implement core features",
+    ///         "priority": "Medium",
+    ///         "complexity": 8,
+    ///         "tags": ["development"],
+    ///         "depends_on": ["setup"]
+    ///     }
+    /// ]"#;
+    ///
+    /// let tasks = Task::parse_idea_breakdown(json_output)?;
+    /// assert_eq!(tasks.len(), 2);
+    /// assert_eq!(tasks[1].depends_on.len(), 1); // development depends on setup
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn parse_idea_breakdown(json_str: &str) -> std::result::Result<Vec<Self>, Box<dyn std::error::Error>> {
+        let tasks = Self::from_json_array(json_str)?;
+        Ok(tasks)
     }
 
     /// Transition task status with validation
@@ -94,13 +260,15 @@ impl Task {
                     "Task must be assigned before starting",
                 ));
             }
-            // Can only complete if code is merged
-            (TaskStatus::Testing, TaskStatus::Completed)
-                if self.code_status != CodeStatus::Merged =>
-            {
-                return Err(OrchestratorError::validation(
-                    "Code must be merged before completing task",
-                ));
+            // Can only complete if code is merged (check PR status if exists)
+            (TaskStatus::Testing, TaskStatus::Completed) => {
+                if let Some(pr) = &self.pull_request {
+                    if !pr.is_merged() {
+                        return Err(OrchestratorError::validation(
+                            "Pull request must be merged before completing task",
+                        ));
+                    }
+                }
             }
             _ => {}
         }
@@ -119,53 +287,7 @@ impl Task {
         Ok(())
     }
 
-    /// Transition code status with validation
-    pub fn transition_code_status(&mut self, next_status: CodeStatus) -> Result<()> {
-        // Validate the transition
-        let new_status = self.code_status.transition_to(next_status)?;
 
-        // Apply business rules
-        match (&self.code_status, &new_status) {
-            // Can only start coding if task is InProgress
-            (CodeStatus::Pending, CodeStatus::Coded) if self.status == TaskStatus::Pending => {
-                return Err(OrchestratorError::validation(
-                    "Task must be in progress before coding",
-                ));
-            }
-            // Track CI attempts (only if no PR exists, otherwise PR handles this)
-            (CodeStatus::PullRequest, CodeStatus::CIFailed | CodeStatus::CISuccessful)
-                if self.pull_request.is_none() =>
-            {
-                self.ci_attemps += 1;
-            }
-            _ => {}
-        }
-
-        // Update status and history
-        let now = Utc::now();
-        self.code_status = new_status;
-        self.code_status_history.push((new_status, now));
-        self.updated_at = Some(now);
-
-        Ok(())
-    }
-
-    /// Handle CI result
-    pub fn handle_ci_result(&mut self, success: bool) -> Result<()> {
-        if self.code_status != CodeStatus::PullRequest {
-            return Err(OrchestratorError::validation(
-                "CI can only run on pull requests",
-            ));
-        }
-
-        let next_status = if success {
-            CodeStatus::CISuccessful
-        } else {
-            CodeStatus::CIFailed
-        };
-
-        self.transition_code_status(next_status)
-    }
 
     /// Add a comment to the task
     pub fn add_comment(&mut self, author: impl Into<String>, content: impl Into<String>) {
@@ -248,9 +370,9 @@ impl Task {
         target_branch: impl Into<String>,
         author: impl Into<String>,
     ) -> Result<()> {
-        if self.code_status != CodeStatus::Coded {
+        if self.status != TaskStatus::InProgress {
             return Err(OrchestratorError::validation(
-                "Can only create pull request when task is coded",
+                "Can only create pull request when task is in progress",
             ));
         }
 
@@ -262,7 +384,7 @@ impl Task {
 
         let pr = PullRequest::new(title, description, source_branch, target_branch, author);
         self.pull_request = Some(pr);
-        self.transition_code_status(CodeStatus::PullRequest)?;
+        self.updated_at = Some(Utc::now());
 
         Ok(())
     }
@@ -301,24 +423,6 @@ impl Task {
             .ok_or_else(|| OrchestratorError::validation("Task has no pull request"))?;
 
         pr.handle_ci_result(success)?;
-
-        // Sync the task's code status with the PR's code status
-        self.code_status = pr.code_status;
-        self.ci_attemps = pr.ci_attemps;
-        self.updated_at = Some(Utc::now());
-
-        Ok(())
-    }
-
-    /// Sync task code status with pull request status
-    pub fn sync_with_pull_request(&mut self) -> Result<()> {
-        let pr = self
-            .pull_request
-            .as_ref()
-            .ok_or_else(|| OrchestratorError::validation("Task has no pull request"))?;
-
-        self.code_status = pr.code_status;
-        self.ci_attemps = pr.ci_attemps;
         self.updated_at = Some(Utc::now());
 
         Ok(())
@@ -425,11 +529,9 @@ impl Task {
             id: self.id,
             title: self.title.clone(),
             status: self.status.clone(),
-            code_status: self.code_status,
             assigned_to: self.assigned_to.as_ref().map(|agent| agent.name.clone()),
             priority: self.priority.clone(),
             is_overdue: self.is_overdue(),
-            ci_attemps: self.ci_attemps,
             comment_count: self.comments.len(),
         }
     }
@@ -479,9 +581,8 @@ mod tests {
         );
         task.assigned_to = Some(agent);
 
-        // Transition task to InProgress first, then to coded
+        // Transition task to InProgress first
         task.transition_task_status(TaskStatus::InProgress).unwrap();
-        task.transition_code_status(CodeStatus::Coded).unwrap();
 
         // Create a pull request
         assert!(
@@ -497,7 +598,8 @@ mod tests {
 
         // Should now have a pull request and be in PR status
         assert!(task.pull_request.is_some());
-        assert_eq!(task.code_status, CodeStatus::PullRequest);
+        let pr = task.get_pull_request().unwrap();
+        assert_eq!(pr.code_status, CodeStatus::PullRequest);
 
         // Now should be able to add PR comment
         assert!(task.add_pr_comment("user1", "PR comment").is_ok());
@@ -507,20 +609,21 @@ mod tests {
 
         // Test CI handling
         assert!(task.handle_pr_ci_result(false).is_ok());
-        assert_eq!(task.code_status, CodeStatus::CIFailed);
-        assert_eq!(task.ci_attemps, 1);
+        let pr = task.get_pull_request().unwrap();
+        assert_eq!(pr.code_status, CodeStatus::CIFailed);
+        assert_eq!(pr.ci_attemps, 1);
 
         // Reset PR to PullRequest status for next CI test (go through Coded first)
         if let Some(pr) = task.get_pull_request_mut() {
             pr.transition_code_status(CodeStatus::Coded).unwrap();
             pr.transition_code_status(CodeStatus::PullRequest).unwrap();
         }
-        task.sync_with_pull_request().unwrap();
 
         // Test successful CI
         assert!(task.handle_pr_ci_result(true).is_ok());
-        assert_eq!(task.code_status, CodeStatus::CISuccessful);
-        assert_eq!(task.ci_attemps, 2);
+        let pr = task.get_pull_request().unwrap();
+        assert_eq!(pr.code_status, CodeStatus::CISuccessful);
+        assert_eq!(pr.ci_attemps, 2);
     }
 
     #[test]
@@ -550,5 +653,293 @@ mod tests {
         let fake_id = Uuid::new_v4();
         assert!(task.update_comment(fake_id, "test").is_err());
         assert!(task.remove_comment(fake_id).is_err());
+    }
+
+    #[test]
+    fn test_task_from_input() {
+        let input = TaskInput {
+            id: "task-1".to_string(),
+            title: "Setup Database".to_string(),
+            description: "Create database schema and tables".to_string(),
+            priority: "High".to_string(),
+            complexity: 7,
+            tags: vec!["backend".to_string(), "database".to_string()],
+            depends_on: vec![],
+        };
+
+        let task = Task::from_input(input, None);
+
+        assert_eq!(task.title, "Setup Database");
+        assert_eq!(task.description, "Create database schema and tables");
+        assert_eq!(task.priority, Priority::High);
+        assert_eq!(task.estimated_complexity, Some(7));
+        assert_eq!(task.tags.len(), 2);
+        assert!(task.tags.contains(&"backend".to_string()));
+        assert!(task.tags.contains(&"database".to_string()));
+        assert_eq!(task.depends_on.len(), 0);
+        assert_eq!(task.status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn test_task_parse_priority() {
+        assert_eq!(Task::parse_priority("Critical"), Priority::Critical);
+        assert_eq!(Task::parse_priority("High"), Priority::High);
+        assert_eq!(Task::parse_priority("Medium"), Priority::Medium);
+        assert_eq!(Task::parse_priority("Low"), Priority::Low);
+        assert_eq!(Task::parse_priority("critical"), Priority::Critical); // case insensitive
+        assert_eq!(Task::parse_priority("unknown"), Priority::Medium); // default
+    }
+
+    #[test]
+    fn test_task_from_json_array() {
+        let json = r#"[
+            {
+                "id": "task-1",
+                "title": "Setup Database",
+                "description": "Create database schema",
+                "priority": "High",
+                "complexity": 5,
+                "tags": ["backend", "database"],
+                "depends_on": []
+            },
+            {
+                "id": "task-2",
+                "title": "Create API",
+                "description": "Build REST API endpoints",
+                "priority": "Medium",
+                "complexity": 7,
+                "tags": ["backend", "api"],
+                "depends_on": ["task-1"]
+            },
+            {
+                "id": "task-3",
+                "title": "Frontend UI",
+                "description": "Create user interface",
+                "priority": "Low",
+                "complexity": 6,
+                "tags": ["frontend", "ui"],
+                "depends_on": ["task-2"]
+            }
+        ]"#;
+
+        let tasks = Task::from_json_array(json).unwrap();
+
+        assert_eq!(tasks.len(), 3);
+
+        // Test first task
+        assert_eq!(tasks[0].title, "Setup Database");
+        assert_eq!(tasks[0].priority, Priority::High);
+        assert_eq!(tasks[0].estimated_complexity, Some(5));
+        assert_eq!(tasks[0].depends_on.len(), 0);
+
+        // Test second task
+        assert_eq!(tasks[1].title, "Create API");
+        assert_eq!(tasks[1].priority, Priority::Medium);
+        assert_eq!(tasks[1].estimated_complexity, Some(7));
+        assert_eq!(tasks[1].depends_on.len(), 1);
+        assert_eq!(tasks[1].depends_on[0], tasks[0].id); // Should depend on first task's UUID
+
+        // Test third task
+        assert_eq!(tasks[2].title, "Frontend UI");
+        assert_eq!(tasks[2].priority, Priority::Low);
+        assert_eq!(tasks[2].estimated_complexity, Some(6));
+        assert_eq!(tasks[2].depends_on.len(), 1);
+        assert_eq!(tasks[2].depends_on[0], tasks[1].id); // Should depend on second task's UUID
+
+        // Verify all tasks have unique UUIDs
+        assert_ne!(tasks[0].id, tasks[1].id);
+        assert_ne!(tasks[1].id, tasks[2].id);
+        assert_ne!(tasks[0].id, tasks[2].id);
+    }
+
+    #[test]
+    fn test_task_from_json_array_complex_dependencies() {
+        let json = r#"[
+            {
+                "id": "planning",
+                "title": "Project Planning",
+                "description": "Plan the project architecture",
+                "priority": "Critical",
+                "complexity": 3,
+                "tags": ["planning"],
+                "depends_on": []
+            },
+            {
+                "id": "backend",
+                "title": "Backend Development",
+                "description": "Develop backend services",
+                "priority": "High",
+                "complexity": 8,
+                "tags": ["backend", "api"],
+                "depends_on": ["planning"]
+            },
+            {
+                "id": "frontend",
+                "title": "Frontend Development",
+                "description": "Develop user interface",
+                "priority": "High",
+                "complexity": 7,
+                "tags": ["frontend", "ui"],
+                "depends_on": ["planning"]
+            },
+            {
+                "id": "integration",
+                "title": "System Integration",
+                "description": "Integrate frontend and backend",
+                "priority": "Medium",
+                "complexity": 5,
+                "tags": ["integration", "testing"],
+                "depends_on": ["backend", "frontend"]
+            }
+        ]"#;
+
+        let tasks = Task::from_json_array(json).unwrap();
+
+        assert_eq!(tasks.len(), 4);
+
+        // Find tasks by title for easier testing
+        let planning = tasks.iter().find(|t| t.title == "Project Planning").unwrap();
+        let backend = tasks.iter().find(|t| t.title == "Backend Development").unwrap();
+        let frontend = tasks.iter().find(|t| t.title == "Frontend Development").unwrap();
+        let integration = tasks.iter().find(|t| t.title == "System Integration").unwrap();
+
+        // Test dependencies
+        assert_eq!(planning.depends_on.len(), 0);
+        assert_eq!(backend.depends_on.len(), 1);
+        assert!(backend.depends_on.contains(&planning.id));
+        assert_eq!(frontend.depends_on.len(), 1);
+        assert!(frontend.depends_on.contains(&planning.id));
+        assert_eq!(integration.depends_on.len(), 2);
+        assert!(integration.depends_on.contains(&backend.id));
+        assert!(integration.depends_on.contains(&frontend.id));
+
+        // Test priorities
+        assert_eq!(planning.priority, Priority::Critical);
+        assert_eq!(backend.priority, Priority::High);
+        assert_eq!(frontend.priority, Priority::High);
+        assert_eq!(integration.priority, Priority::Medium);
+    }
+
+    #[test]
+    fn test_task_from_json_array_invalid_json() {
+        let invalid_json = r#"[{"invalid": "structure"}]"#;
+        let result = Task::from_json_array(invalid_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_task_from_json_array_empty() {
+        let empty_json = "[]";
+        let tasks = Task::from_json_array(empty_json).unwrap();
+        assert_eq!(tasks.len(), 0);
+    }
+
+    #[test]
+    fn test_task_from_input_with_dependencies() {
+        let mut id_mapping = std::collections::HashMap::new();
+        let dep_uuid = Uuid::new_v4();
+        id_mapping.insert("dependency-task".to_string(), dep_uuid);
+
+        let input = TaskInput {
+            id: "main-task".to_string(),
+            title: "Main Task".to_string(),
+            description: "A task with dependencies".to_string(),
+            priority: "Medium".to_string(),
+            complexity: 4,
+            tags: vec!["test".to_string()],
+            depends_on: vec!["dependency-task".to_string()],
+        };
+
+        let task = Task::from_input(input, Some(&id_mapping));
+
+        assert_eq!(task.depends_on.len(), 1);
+        assert_eq!(task.depends_on[0], dep_uuid);
+    }
+
+    #[test]
+    fn test_task_parse_idea_breakdown() {
+        let json = r#"[
+            {
+                "id": "research",
+                "title": "Research and Planning",
+                "description": "Research requirements and plan architecture",
+                "priority": "Critical",
+                "complexity": 4,
+                "tags": ["planning", "research"],
+                "depends_on": []
+            },
+            {
+                "id": "backend",
+                "title": "Backend Development",
+                "description": "Implement backend services and APIs",
+                "priority": "High",
+                "complexity": 8,
+                "tags": ["backend", "api", "database"],
+                "depends_on": ["research"]
+            },
+            {
+                "id": "frontend",
+                "title": "Frontend Development",
+                "description": "Create user interface and user experience",
+                "priority": "High",
+                "complexity": 7,
+                "tags": ["frontend", "ui", "ux"],
+                "depends_on": ["research"]
+            },
+            {
+                "id": "testing",
+                "title": "Testing and QA",
+                "description": "Comprehensive testing and quality assurance",
+                "priority": "Medium",
+                "complexity": 5,
+                "tags": ["testing", "qa"],
+                "depends_on": ["backend", "frontend"]
+            }
+        ]"#;
+
+        let tasks = Task::parse_idea_breakdown(json).unwrap();
+
+        assert_eq!(tasks.len(), 4);
+
+        // Find tasks by title
+        let research = tasks.iter().find(|t| t.title == "Research and Planning").unwrap();
+        let backend = tasks.iter().find(|t| t.title == "Backend Development").unwrap();
+        let frontend = tasks.iter().find(|t| t.title == "Frontend Development").unwrap();
+        let testing = tasks.iter().find(|t| t.title == "Testing and QA").unwrap();
+
+        // Verify dependencies are properly resolved
+        assert_eq!(research.depends_on.len(), 0);
+        assert_eq!(backend.depends_on.len(), 1);
+        assert!(backend.depends_on.contains(&research.id));
+        assert_eq!(frontend.depends_on.len(), 1);
+        assert!(frontend.depends_on.contains(&research.id));
+        assert_eq!(testing.depends_on.len(), 2);
+        assert!(testing.depends_on.contains(&backend.id));
+        assert!(testing.depends_on.contains(&frontend.id));
+
+        // Verify all tasks have proper attributes
+        assert_eq!(research.priority, Priority::Critical);
+        assert_eq!(backend.priority, Priority::High);
+        assert_eq!(frontend.priority, Priority::High);
+        assert_eq!(testing.priority, Priority::Medium);
+
+        // Verify complexity is set
+        assert_eq!(research.estimated_complexity, Some(4));
+        assert_eq!(backend.estimated_complexity, Some(8));
+        assert_eq!(frontend.estimated_complexity, Some(7));
+        assert_eq!(testing.estimated_complexity, Some(5));
+
+        // Verify tags are preserved
+        assert!(research.tags.contains(&"planning".to_string()));
+        assert!(backend.tags.contains(&"api".to_string()));
+        assert!(frontend.tags.contains(&"ui".to_string()));
+        assert!(testing.tags.contains(&"qa".to_string()));
+    }
+
+    #[test]
+    fn test_task_parse_idea_breakdown_invalid() {
+        let invalid_json = r#"[{"invalid": "structure"}]"#;
+        let result = Task::parse_idea_breakdown(invalid_json);
+        assert!(result.is_err());
     }
 }

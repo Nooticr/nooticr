@@ -1,9 +1,10 @@
 use crate::enums::{CodeStatus, CommentType};
 use crate::error::{OrchestratorError, Result};
-use crate::models::comment::Comment;
+use super::comment::Comment;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use super::code_review::CodeReview;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullRequest {
@@ -26,6 +27,7 @@ pub struct PullRequest {
     pub merged_at: Option<DateTime<Utc>>,
     pub closed_at: Option<DateTime<Utc>>,
     pub remotly_synced: bool,
+    pub code_reviews: Vec<CodeReview>,
 }
 
 impl PullRequest {
@@ -60,6 +62,7 @@ impl PullRequest {
             merged_at: None,
             closed_at: None,
             remotly_synced: false,
+            code_reviews: Vec::new(),
         }
     }
 
@@ -146,6 +149,86 @@ impl PullRequest {
             comment.mark_synced();
         }
         self.updated_at = Utc::now();
+    }
+
+    /// Add a code review to the pull request
+    pub fn add_code_review(
+        &mut self,
+        reviewer: impl Into<String>,
+        approved: bool,
+        comments: Vec<String>,
+    ) -> Uuid {
+        let review = CodeReview::new(self.id.to_string(), reviewer, approved, comments);
+        let review_id = review.id;
+        self.code_reviews.push(review);
+        self.updated_at = Utc::now();
+        self.remotly_synced = false; // Mark as unsynced when reviews are added
+        review_id
+    }
+
+    /// Get all code reviews
+    pub fn get_code_reviews(&self) -> &Vec<CodeReview> {
+        &self.code_reviews
+    }
+
+    /// Get approved reviews count
+    pub fn get_approved_reviews_count(&self) -> usize {
+        self.code_reviews.iter().filter(|r| r.approved).count()
+    }
+
+    /// Check if PR has any approved reviews
+    pub fn has_approved_reviews(&self) -> bool {
+        self.code_reviews.iter().any(|r| r.approved)
+    }
+
+    /// Check if PR has any rejected reviews
+    pub fn has_rejected_reviews(&self) -> bool {
+        self.code_reviews.iter().any(|r| !r.approved)
+    }
+
+    /// Get review by ID
+    pub fn get_code_review(&self, review_id: Uuid) -> Option<&CodeReview> {
+        self.code_reviews.iter().find(|r| r.id == review_id)
+    }
+
+    /// Get mutable review by ID
+    pub fn get_code_review_mut(&mut self, review_id: Uuid) -> Option<&mut CodeReview> {
+        self.code_reviews.iter_mut().find(|r| r.id == review_id)
+    }
+
+    /// Get reviews by reviewer
+    pub fn get_reviews_by_reviewer(&self, reviewer: &str) -> Vec<&CodeReview> {
+        self.code_reviews.iter().filter(|r| r.reviewer == reviewer).collect()
+    }
+
+    /// Update a code review
+    pub fn update_code_review(
+        &mut self,
+        review_id: Uuid,
+        approved: bool,
+    ) -> Result<()> {
+        let review = self
+            .get_code_review_mut(review_id)
+            .ok_or_else(|| OrchestratorError::validation("Code review not found"))?;
+
+        review.update_approval(approved);
+        self.updated_at = Utc::now();
+        self.remotly_synced = false; // Mark as unsynced when reviews are modified
+        Ok(())
+    }
+
+    /// Remove a code review
+    pub fn remove_code_review(&mut self, review_id: Uuid) -> Result<CodeReview> {
+        let position = self
+            .code_reviews
+            .iter()
+            .position(|r| r.id == review_id)
+            .ok_or_else(|| OrchestratorError::validation("Code review not found"))?;
+
+        let removed_review = self.code_reviews.remove(position);
+        self.updated_at = Utc::now();
+        self.remotly_synced = false; // Mark as unsynced when reviews are removed
+        Ok(removed_review)
     }
 
     /// Get comment by ID
@@ -490,5 +573,73 @@ mod tests {
         // Mark all as synced
         pr.mark_all_comments_synced();
         assert_eq!(pr.get_unsynced_comments().len(), 0);
+    }
+
+    #[test]
+    fn test_pull_request_code_review_management() {
+        let mut pr = PullRequest::new("Test", "Description", "feature", "main", "author");
+        pr.mark_synced();
+
+        // Initially no reviews
+        assert_eq!(pr.get_code_reviews().len(), 0);
+        assert!(!pr.has_approved_reviews());
+        assert!(!pr.has_rejected_reviews());
+        assert_eq!(pr.get_approved_reviews_count(), 0);
+
+        // Add approved review
+        let review1_id = pr.add_code_review("reviewer1", true, vec!["Looks good!".to_string()]);
+        assert_eq!(pr.get_code_reviews().len(), 1);
+        assert!(pr.has_approved_reviews());
+        assert!(!pr.has_rejected_reviews());
+        assert_eq!(pr.get_approved_reviews_count(), 1);
+        assert!(pr.needs_sync()); // Should mark as unsynced
+
+        // Add rejected review
+        pr.mark_synced();
+        let review2_id = pr.add_code_review("reviewer2", false, vec!["Needs changes".to_string(), "Fix the bug".to_string()]);
+        assert_eq!(pr.get_code_reviews().len(), 2);
+        assert!(pr.has_approved_reviews());
+        assert!(pr.has_rejected_reviews());
+        assert_eq!(pr.get_approved_reviews_count(), 1);
+        assert!(pr.needs_sync()); // Should mark as unsynced again
+
+        // Test getting reviews by ID
+        let review1 = pr.get_code_review(review1_id).unwrap();
+        assert!(review1.approved);
+        assert_eq!(review1.comments.len(), 1);
+        assert_eq!(review1.reviewer, "reviewer1");
+
+        let review2 = pr.get_code_review(review2_id).unwrap();
+        assert!(!review2.approved);
+        assert_eq!(review2.comments.len(), 2);
+        assert_eq!(review2.reviewer, "reviewer2");
+
+        // Test getting reviews by reviewer
+        let reviewer1_reviews = pr.get_reviews_by_reviewer("reviewer1");
+        assert_eq!(reviewer1_reviews.len(), 1);
+        assert!(reviewer1_reviews[0].approved);
+
+        let reviewer2_reviews = pr.get_reviews_by_reviewer("reviewer2");
+        assert_eq!(reviewer2_reviews.len(), 1);
+        assert!(!reviewer2_reviews[0].approved);
+
+        // Test updating review
+        pr.mark_synced();
+        assert!(pr.update_code_review(review2_id, true).is_ok());
+        assert!(pr.needs_sync()); // Should mark as unsynced
+        let updated_review = pr.get_code_review(review2_id).unwrap();
+        assert!(updated_review.approved);
+
+        // Test removing review
+        pr.mark_synced();
+        assert!(pr.remove_code_review(review1_id).is_ok());
+        assert_eq!(pr.get_code_reviews().len(), 1);
+        assert!(pr.needs_sync()); // Should mark as unsynced
+
+        // Test non-existent review
+        let fake_id = Uuid::new_v4();
+        assert!(pr.get_code_review(fake_id).is_none());
+        assert!(pr.update_code_review(fake_id, true).is_err());
+        assert!(pr.remove_code_review(fake_id).is_err());
     }
 }

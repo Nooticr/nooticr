@@ -40,6 +40,97 @@ pub enum Action {
 }
 
 impl Action {
+    /// Deserialize a JSON string containing an array of actions
+    ///
+    /// This is used to parse the output from `conflict_resolution_user_prompt`
+    /// and `feature_development_user_prompt`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use orchy::enums::Action;
+    ///
+    /// let json = r#"[
+    ///     {
+    ///         "Write": {
+    ///             "path": "src/main.rs",
+    ///             "content": "fn main() { println!(\"Hello, world!\"); }"
+    ///         }
+    ///     },
+    ///     {
+    ///         "Read": {
+    ///             "path": "src/lib.rs"
+    ///         }
+    ///     }
+    /// ]"#;
+    ///
+    /// let actions = Action::from_json_array(json).unwrap();
+    /// assert_eq!(actions.len(), 2);
+    /// ```
+    pub fn from_json_array(json_str: &str) -> Result<Vec<Action>, serde_json::Error> {
+        serde_json::from_str(json_str)
+    }
+
+    /// Parse and execute actions from a JSON string in one step
+    ///
+    /// This is a convenience function for processing prompt outputs.
+    /// It combines `from_json_array` and `execute_batch` into a single call.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use orchy::enums::Action;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let json_output = r#"[
+    ///     {
+    ///         "Write": {
+    ///             "path": "hello.txt",
+    ///             "content": "Hello, World!"
+    ///         }
+    ///     }
+    /// ]"#;
+    ///
+    /// Action::parse_and_execute(json_output).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn parse_and_execute(json_str: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let actions = Self::from_json_array(json_str)?;
+        Self::execute_batch(&actions).await?;
+        Ok(())
+    }
+
+    /// Execute a batch of actions sequentially
+    ///
+    /// All actions are executed in the order they appear in the slice.
+    /// If any action fails, execution stops and the error is returned.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use orchy::enums::Action;
+    ///
+    /// # async fn example() -> Result<(), std::io::Error> {
+    /// let actions = vec![
+    ///     Action::Write {
+    ///         path: "file1.txt".to_string(),
+    ///         content: "Content 1".to_string(),
+    ///     },
+    ///     Action::Write {
+    ///         path: "file2.txt".to_string(),
+    ///         content: "Content 2".to_string(),
+    ///     },
+    /// ];
+    ///
+    /// Action::execute_batch(&actions).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn execute_batch(actions: &[Action]) -> Result<(), std::io::Error> {
+        for action in actions {
+            action.execute().await?;
+        }
+        Ok(())
+    }
+
     pub async fn execute(&self) -> Result<(), std::io::Error> {
         match self {
             Action::Write { path, content } => {
@@ -374,5 +465,219 @@ mod tests {
             .await
             .expect("Should read file content");
         assert_eq!(content, "Nested file content");
+    }
+
+    #[tokio::test]
+    async fn test_from_json_array() {
+        let json_str = r#"[
+            {
+                "Write": {
+                    "path": "src/main.rs",
+                    "content": "fn main() { println!(\"Hello, world!\"); }"
+                }
+            },
+            {
+                "Read": {
+                    "path": "src/lib.rs"
+                }
+            },
+            {
+                "Delete": {
+                    "path": "target/debug/tempfile.txt"
+                }
+            },
+            {
+                "Update": {
+                    "path": "src/config.rs",
+                    "content": "pub const VERSION: &str = \"1.0.1\";"
+                }
+            },
+            {
+                "Replace": {
+                    "path": "README.md",
+                    "old_content": "Project Alpha",
+                    "new_content": "Project Beta"
+                }
+            },
+            {
+                "Move": {
+                    "old_path": "docs/old_intro.md",
+                    "new_path": "docs/introduction.md"
+                }
+            },
+            {
+                "Copy": {
+                    "old_path": "src/main.rs",
+                    "new_path": "src/main_backup.rs"
+                }
+            },
+            {
+                "RunCommand": {
+                    "command": "cargo build",
+                    "env": [
+                        ["RUST_LOG", "debug"],
+                        ["RUST_BACKTRACE", "1"]
+                    ]
+                }
+            }
+        ]"#;
+
+        let actions = Action::from_json_array(json_str).expect("Should parse JSON successfully");
+
+        assert_eq!(actions.len(), 8);
+
+        // Test each action type
+        match &actions[0] {
+            Action::Write { path, content } => {
+                assert_eq!(path, "src/main.rs");
+                assert_eq!(content, "fn main() { println!(\"Hello, world!\"); }");
+            }
+            _ => panic!("Expected Write action"),
+        }
+
+        match &actions[1] {
+            Action::Read { path } => {
+                assert_eq!(path, "src/lib.rs");
+            }
+            _ => panic!("Expected Read action"),
+        }
+
+        match &actions[2] {
+            Action::Delete { path } => {
+                assert_eq!(path, "target/debug/tempfile.txt");
+            }
+            _ => panic!("Expected Delete action"),
+        }
+
+        match &actions[3] {
+            Action::Update { path, content } => {
+                assert_eq!(path, "src/config.rs");
+                assert_eq!(content, "pub const VERSION: &str = \"1.0.1\";");
+            }
+            _ => panic!("Expected Update action"),
+        }
+
+        match &actions[4] {
+            Action::Replace { path, old_content, new_content } => {
+                assert_eq!(path, "README.md");
+                assert_eq!(old_content, "Project Alpha");
+                assert_eq!(new_content, "Project Beta");
+            }
+            _ => panic!("Expected Replace action"),
+        }
+
+        match &actions[5] {
+            Action::Move { old_path, new_path } => {
+                assert_eq!(old_path, "docs/old_intro.md");
+                assert_eq!(new_path, "docs/introduction.md");
+            }
+            _ => panic!("Expected Move action"),
+        }
+
+        match &actions[6] {
+            Action::Copy { old_path, new_path } => {
+                assert_eq!(old_path, "src/main.rs");
+                assert_eq!(new_path, "src/main_backup.rs");
+            }
+            _ => panic!("Expected Copy action"),
+        }
+
+        match &actions[7] {
+            Action::RunCommand { command, env } => {
+                assert_eq!(command, "cargo build");
+                assert!(env.is_some());
+                let env_vars = env.as_ref().unwrap();
+                assert_eq!(env_vars.len(), 2);
+                assert_eq!(env_vars[0], ("RUST_LOG".to_string(), "debug".to_string()));
+                assert_eq!(env_vars[1], ("RUST_BACKTRACE".to_string(), "1".to_string()));
+            }
+            _ => panic!("Expected RunCommand action"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_from_json_array_invalid_json() {
+        let invalid_json = r#"[{"InvalidAction": {}}]"#;
+        let result = Action::from_json_array(invalid_json);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_from_json_array_empty() {
+        let empty_json = "[]";
+        let actions = Action::from_json_array(empty_json).expect("Should parse empty array");
+        assert_eq!(actions.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_execute_batch() {
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let file1_path = temp_dir.path().join("file1.txt");
+        let file2_path = temp_dir.path().join("file2.txt");
+
+        let actions = vec![
+            Action::Write {
+                path: file1_path.to_string_lossy().to_string(),
+                content: "Content 1".to_string(),
+            },
+            Action::Write {
+                path: file2_path.to_string_lossy().to_string(),
+                content: "Content 2".to_string(),
+            },
+        ];
+
+        Action::execute_batch(&actions)
+            .await
+            .expect("Batch execution should succeed");
+
+        // Verify both files were created
+        assert!(file1_path.exists());
+        assert!(file2_path.exists());
+
+        let content1 = fs::read_to_string(&file1_path)
+            .await
+            .expect("Should read file1 content");
+        let content2 = fs::read_to_string(&file2_path)
+            .await
+            .expect("Should read file2 content");
+
+        assert_eq!(content1, "Content 1");
+        assert_eq!(content2, "Content 2");
+    }
+
+    #[tokio::test]
+    async fn test_parse_and_execute() {
+        let temp_dir = tempdir().expect("Failed to create temp directory");
+        let file_path = temp_dir.path().join("test.txt");
+
+        let json_str = format!(
+            r#"[
+                {{
+                    "Write": {{
+                        "path": "{}",
+                        "content": "Hello from JSON!"
+                    }}
+                }}
+            ]"#,
+            file_path.to_string_lossy()
+        );
+
+        Action::parse_and_execute(&json_str)
+            .await
+            .expect("Parse and execute should succeed");
+
+        // Verify the file was created
+        assert!(file_path.exists());
+        let content = fs::read_to_string(&file_path)
+            .await
+            .expect("Should read file content");
+        assert_eq!(content, "Hello from JSON!");
+    }
+
+    #[tokio::test]
+    async fn test_parse_and_execute_invalid_json() {
+        let invalid_json = r#"[{"InvalidAction": {}}]"#;
+        let result = Action::parse_and_execute(invalid_json).await;
+        assert!(result.is_err());
     }
 }

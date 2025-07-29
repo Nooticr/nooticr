@@ -6,3 +6,4 @@ pub mod issue_status_change;
 pub mod project;
 pub mod pull_request;
 pub mod task;
+pub mod code_review;

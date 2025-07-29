@@ -33,15 +33,17 @@ impl Prompts {
             Ensure each task has clear acceptance criteria and appropriate technology tags. return everythin in a json
             in this format (important)
 
-             [{
+             ```
+             [{{
                 "id": "unique_task_id",
                 "title": "Task title",
                 "description": "Task description",
                 "priority": "High/Medium/Low/Critical",
                 "complexity": 1-10,
-                "tags": ["tag1", "tag2", "tag3"]
-                "depends_on": ["task_id1", "task_id2"]
-             }]
+                "tags": ["tag1", "tag2", "tag3"],
+                "depends_on": ["task_id1", "task_id2"],
+             }}]
+             ```
             "#,
             idea, context
         )
@@ -69,12 +71,30 @@ impl Prompts {
                     4. Add meaningful comments for complex logic
                     5. Ensure code is production-ready
 
-                    Please provide complete implementation with file paths."#,
+                    Please provide complete implementation with file paths.
+                    
+                    please return a json output that can be deserialized into this Rust Enum (important)
+
+                    pub enum Action {{
+                        Write {{ path: String, content: String }},
+                        Read {{ path: String }},
+                        Delete {{ path: String }},
+                        Update {{ path: String, content: String }},
+                        Replace {{ path: String, old_content: String, new_content: String }},
+                        Move {{ old_path: String, new_path: String }},
+                        Copy {{ old_path: String, new_path: String }},
+                        RunCommand {{ command: String, env: Option<Vec<(String, String)>> }},
+                    }}
+
+                    return an array of actions to be executed in order (important)
+
+                    
+                    "#,
             task_description, codebase_context, tech_stack
         )
     }
 
-    pub fn code_review_user_prompt(code: &str, requirements: &str, context: &str) -> String {
+    pub fn code_review_user_prompt(code: &str, requirements: &str, context: &str, pull_request_id: &str) -> String {
         format!(
             r#"Review this code implementation against the requirements:
 
@@ -93,8 +113,18 @@ impl Prompts {
             3. Is the code maintainable and well-structured?
             4. Are there security or performance concerns?
             5. Is error handling appropriate?
-            6. Would you approve this code for production?"#,
-            code, requirements, context
+            6. Would you approve this code for production?
+            
+            return a json output that can be deserialized into this Rust Struct (important)
+
+            pub struct CodeReview {{
+                pub id: Option<Uuid>, // Unique identifier (always null)
+                pub pull_request_id: {},
+                pub approved: bool,
+                pub comments: Vec<String>, // List of comments or feedback, can be code to change
+            }}
+            "#,
+            code, requirements, context, pull_request_id
         )
     }
 
@@ -122,7 +152,23 @@ impl Prompts {
                 4. Remove all conflict markers (<<<<<<< ======= >>>>>>>)
                 5. Provide clean, production-ready code
 
-                Please provide the complete resolved file content."#,
+                Please provide the complete resolved file content.
+                
+                return a json output that can be deserialized into this Rust Enum (important)
+
+                pub enum Action {{
+                    Write {{ path: String, content: String }},
+                    Read {{ path: String }},
+                    Delete {{ path: String }},
+                    Update {{ path: String, content: String }},
+                    Replace {{ path: String, old_content: String, new_content: String }},
+                    Move {{ old_path: String, new_path: String }},
+                    Copy {{ old_path: String, new_path: String }},
+                    RunCommand {{ command: String, env: Option<Vec<(String, String)>> }},
+                }}
+
+                return an array of actions to be executed in order (important)
+                "#,
             conflict_content, context, branch_info
         )
     }

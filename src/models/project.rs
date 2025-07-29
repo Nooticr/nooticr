@@ -1678,9 +1678,9 @@ mod tests {
         project.transition_to(ProjectStatus::Active).unwrap();
 
         let agent1 = create_test_agent("Agent 1");
-        let agent1_id = agent1.id;
+        let _agent1_id = agent1.id;
         let agent2 = create_test_agent("Agent 2");
-        let agent2_id = agent2.id;
+        let _agent2_id = agent2.id;
 
         let task1 = create_test_task("Task 1", vec![]);
         let task1_id = task1.id;
@@ -2138,7 +2138,6 @@ mod tests {
         let agent = create_test_agent("Agent 1");
         task.assigned_to = Some(agent);
         task.transition_task_status(TaskStatus::InProgress).unwrap();
-        task.transition_code_status(CodeStatus::Coded).unwrap();
         task.create_pull_request("Fix: Task", "Description", "feature/task", "main", "dev")
             .unwrap();
 
@@ -2169,7 +2168,6 @@ mod tests {
         let agent = create_test_agent("Agent 1");
         task.assigned_to = Some(agent);
         task.transition_task_status(TaskStatus::InProgress).unwrap();
-        task.transition_code_status(CodeStatus::Coded).unwrap();
         task.create_pull_request("Fix: Task", "Description", "feature/task", "main", "dev")
             .unwrap();
 
@@ -2192,7 +2190,6 @@ mod tests {
         let agent = create_test_agent("Agent 1");
         task.assigned_to = Some(agent);
         task.transition_task_status(TaskStatus::InProgress).unwrap();
-        task.transition_code_status(CodeStatus::Coded).unwrap();
         task.create_pull_request("Fix: Task", "Description", "feature/task", "main", "dev")
             .unwrap();
         task.add_pr_comment("user", "Great work!").unwrap();
