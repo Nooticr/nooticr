@@ -118,6 +118,11 @@ pub enum ProjectCommand {
     ExecuteTaskWithMcp { task_id: Uuid, mcp_client: crate::managers::McpClient, respond_to: mpsc::UnboundedSender<Result<()>> },
     ProcessTaskCompletion { task_id: Uuid, mcp_client: crate::managers::McpClient, respond_to: mpsc::UnboundedSender<Result<()>> },
     
+    // Status Transition Commands (queue-based)
+    TransitionTaskStatus { task_id: Uuid, new_status: TaskStatus, reason: String },
+    TransitionAgentStatus { agent_id: Uuid, new_status: AgentStatus, reason: String },
+    TransitionIssueStatus { issue_id: Uuid, new_status: IssueStatus, reason: String },
+    
     // Project Management
     CreateProject { 
         name: String, 
@@ -199,6 +204,7 @@ impl ProjectManager {
         let (event_broadcaster, _) = broadcast::channel(1000);
         
         let project = Arc::new(RwLock::new(project));
+        
         let manager = ProjectManager {
             project: project.clone(),
             command_sender,
@@ -575,6 +581,37 @@ impl ProjectManager {
                         &event_broadcaster
                     ).await;
                     let _ = respond_to.send(result);
+                }
+
+                // Status Transition Commands (queue-based streaming updates)
+                ProjectCommand::TransitionTaskStatus { task_id, new_status, reason } => {
+                    Self::handle_transition_task_status(
+                        &project,
+                        task_id,
+                        new_status,
+                        reason,
+                        &event_broadcaster
+                    ).await;
+                }
+
+                ProjectCommand::TransitionAgentStatus { agent_id, new_status, reason } => {
+                    Self::handle_transition_agent_status(
+                        &project,
+                        agent_id,
+                        new_status,
+                        reason,
+                        &event_broadcaster
+                    ).await;
+                }
+
+                ProjectCommand::TransitionIssueStatus { issue_id, new_status, reason } => {
+                    Self::handle_transition_issue_status(
+                        &project,
+                        issue_id,
+                        new_status,
+                        reason,
+                        &event_broadcaster
+                    ).await;
                 }
 
                 ProjectCommand::Shutdown => {
@@ -1549,9 +1586,30 @@ impl ProjectManager {
             // Verify all dependencies are completed
             debug!("🔍 ProjectManager: Verifying dependencies are satisfied...");
             if !DependencyResolver::are_dependencies_satisfied(task, &completed_tasks) {
-                let error_msg = format!("Task '{}' has unsatisfied dependencies", task.title);
-                debug!("❌ ProjectManager: {}", error_msg);
-                return Err(OrchestratorError::validation(&error_msg));
+                debug!("⚠️  ProjectManager: Task '{}' has unsatisfied dependencies, skipping", task.title);
+                debug!("🔄 ProjectManager: Marking task as failed due to unsatisfied dependencies");
+                
+                // Mark task as failed due to dependency issues
+                {
+                    let mut project_guard = project.write().await;
+                    if let Some(mut_task) = project_guard.get_task_mut(task.id) {
+                        if let Err(e) = mut_task.transition_task_status(TaskStatus::Failed) {
+                            debug!("⚠️  Failed to transition task to Failed: {}", e);
+                        } else {
+                            debug!("✅ Task '{}' transitioned to Failed due to dependency issues", task.title);
+                        }
+                    }
+                }
+                
+                // Emit failure event and continue with next task
+                let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                    task_id: task.id,
+                    old_status: TaskStatus::Pending,
+                    new_status: TaskStatus::Failed,
+                });
+                
+                debug!("⏭️  ProjectManager: Skipping to next task");
+                continue;
             }
             debug!("✅ ProjectManager: All dependencies satisfied, proceeding with task execution");
 
@@ -1571,7 +1629,18 @@ impl ProjectManager {
                 }
                 Err(e) => {
                     debug!("❌ ProjectManager: Task '{}' execution failed: {}", task.title, e);
-                    return Err(e);
+                    debug!("🔄 ProjectManager: Continuing with next task (non-blocking failure)");
+                    
+                    // Emit failure event but continue processing other tasks
+                    let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                        task_id: task.id,
+                        old_status: TaskStatus::InProgress,
+                        new_status: TaskStatus::Failed,
+                    });
+                    
+                    // DO NOT return error - continue with next task
+                    // Tasks that depend on this failed task will be skipped naturally
+                    debug!("⚠️  ProjectManager: Task '{}' failed but continuing execution", task.title);
                 }
             }
 
@@ -1596,6 +1665,112 @@ impl ProjectManager {
 
         debug!("🏁 ProjectManager: Task-by-task development process complete!");
         Ok(())
+    }
+
+    /// Handle task status transition with streaming updates and status history
+    async fn handle_transition_task_status(
+        project: &Arc<RwLock<Project>>,
+        task_id: Uuid,
+        new_status: TaskStatus,
+        reason: String,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) {
+        let mut project_guard = project.write().await;
+        
+        if let Some(task) = project_guard.get_task_mut(task_id) {
+            let old_status = task.status.clone();
+            
+            // Transition the task status (this automatically updates status history)
+            if let Err(e) = task.transition_task_status(new_status.clone()) {
+                debug!("❌ Failed to transition task status: {}", e);
+                return;
+            }
+            
+            debug!("🔄 Task '{}' transitioned from {:?} to {:?}", task.title, old_status, new_status);
+            
+            // Emit streaming event
+            let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                task_id,
+                old_status,
+                new_status,
+            });
+            
+            // Update project statistics
+            let stats = Self::calculate_statistics_from_project(&*project_guard);
+            let _ = event_broadcaster.send(ProjectEvent::ProjectStatisticsUpdated { stats });
+        } else {
+            debug!("⚠️  Task with ID {} not found for status transition", task_id);
+        }
+    }
+
+    /// Handle agent status transition with streaming updates and status history
+    async fn handle_transition_agent_status(
+        project: &Arc<RwLock<Project>>,
+        agent_id: Uuid,
+        new_status: AgentStatus,
+        reason: String,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) {
+        let mut project_guard = project.write().await;
+        
+        if let Some(agent) = project_guard.get_agent_mut(agent_id) {
+            let old_status = agent.status.clone();
+            let agent_name = agent.name.clone();
+            
+            // Transition the agent status (this automatically updates status history)
+            if let Err(e) = agent.transition_to(new_status.clone(), Some(reason)) {
+                debug!("❌ Failed to transition agent status: {}", e);
+                return;
+            }
+            
+            debug!("🔄 Agent '{}' transitioned from {:?} to {:?}", agent_name, old_status, new_status);
+            
+            // Emit streaming event
+            let _ = event_broadcaster.send(ProjectEvent::AgentStatusChanged {
+                agent_id,
+                agent_name,
+                old_status,
+                new_status,
+            });
+        } else {
+            debug!("⚠️  Agent with ID {} not found for status transition", agent_id);
+        }
+    }
+
+    /// Handle issue status transition with streaming updates and status history
+    async fn handle_transition_issue_status(
+        project: &Arc<RwLock<Project>>,
+        issue_id: Uuid,
+        new_status: IssueStatus,
+        reason: String,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) {
+        let mut project_guard = project.write().await;
+        
+        if let Some(issue) = project_guard.get_issue_mut(issue_id) {
+            let old_status = issue.status.clone();
+            
+            // Transition the issue status (this automatically updates status history)
+            if let Err(e) = issue.transition_to(new_status.clone(), "ProjectManager", Some(reason)) {
+                debug!("❌ Failed to transition issue status: {}", e);
+                return;
+            }
+            
+            debug!("🔄 Issue '{}' transitioned from {:?} to {:?}", issue.title, old_status, new_status);
+            
+            // Emit streaming event
+            let _ = event_broadcaster.send(ProjectEvent::IssueStatusChanged {
+                issue_id,
+                old_status,
+                new_status,
+            });
+            
+            // Update project statistics
+            let stats = Self::calculate_statistics_from_project(&*project_guard);
+            let _ = event_broadcaster.send(ProjectEvent::ProjectStatisticsUpdated { stats });
+        } else {
+            debug!("⚠️  Issue with ID {} not found for status transition", issue_id);
+        }
     }
 }
 

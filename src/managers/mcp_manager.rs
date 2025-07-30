@@ -567,7 +567,7 @@ Maintain separation of concerns and modular architecture.
         Ok(parsed_response)
     }
 
-    /// Execute task-specific development prompt
+    /// Execute task-specific development prompt with retry logic
     async fn execute_task_development(
         &mut self,
         task_title: &str,
@@ -606,16 +606,84 @@ Maintain separation of concerns and modular architecture.
         debug!("   ✅ Completed dependencies: {}", completed_dependencies.len());
         debug!("   ✔️  Acceptance criteria: {}", acceptance_criteria.len());
 
-        let response = self.execute_prompt(&prompt, model.clone()).await?;
-        let parsed_response: FeatureDevelopmentResponse = self.parse_json_response(&response)?;
-
+        // Try up to 3 times with retry logic for JSON parsing failures
+        let max_retries = 3;
+        let mut last_error = None;
+        
+        for attempt in 1..=max_retries {
+            debug!("🔄 Attempt {}/{} for task development", attempt, max_retries);
+            
+            match self.execute_prompt(&prompt, model.clone()).await {
+                Ok(response) => {
+                    match self.parse_json_response::<FeatureDevelopmentResponse>(&response) {
+                        Ok(parsed_response) => {
+                            debug!("✅ Task development successful on attempt {}", attempt);
+                            debug!("   🎬 Generated {} actions", parsed_response.actions.len());
+                            let execution_time = start_time.elapsed().as_millis() as u64;
+                            self.update_statistics("task_development", model, execution_time, true);
+                            return Ok(parsed_response);
+                        }
+                        Err(parse_error) => {
+                            debug!("❌ JSON parsing failed on attempt {}: {}", attempt, parse_error);
+                            let error_message = parse_error.to_string();
+                            last_error = Some(parse_error);
+                            
+                            if attempt < max_retries {
+                                debug!("🔁 Retrying with error feedback to AI...");
+                                // Create a retry prompt with the error information
+                                let retry_prompt = format!(
+                                    "{}\n\nPREVIOUS ATTEMPT FAILED:\nError: {}\nResponse that failed: {}\n\nPlease fix the JSON format and try again. Ensure valid JSON syntax with proper escaping of quotes and commas.",
+                                    prompt,
+                                    error_message,
+                                    &response[..response.len().min(1000)]
+                                );
+                                
+                                // Use the retry prompt for next attempt
+                                match self.execute_prompt(&retry_prompt, model.clone()).await {
+                                    Ok(retry_response) => {
+                                        match self.parse_json_response::<FeatureDevelopmentResponse>(&retry_response) {
+                                            Ok(parsed_response) => {
+                                                debug!("✅ Task development successful on retry {}", attempt);
+                                                debug!("   🎬 Generated {} actions", parsed_response.actions.len());
+                                                let execution_time = start_time.elapsed().as_millis() as u64;
+                                                self.update_statistics("task_development", model, execution_time, true);
+                                                return Ok(parsed_response);
+                                            }
+                                            Err(retry_parse_error) => {
+                                                debug!("❌ Retry JSON parsing also failed: {}", retry_parse_error);
+                                                last_error = Some(retry_parse_error);
+                                            }
+                                        }
+                                    }
+                                    Err(retry_prompt_error) => {
+                                        debug!("❌ Retry prompt execution failed: {}", retry_prompt_error);
+                                        last_error = Some(retry_prompt_error);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(prompt_error) => {
+                    debug!("❌ Prompt execution failed on attempt {}: {}", attempt, prompt_error);
+                    last_error = Some(prompt_error);
+                }
+            }
+            
+            if attempt < max_retries {
+                debug!("⏳ Waiting 2 seconds before retry attempt {}...", attempt + 1);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+        
+        // All attempts failed
+        let final_error = last_error.unwrap_or_else(|| OrchestratorError::internal("Unknown error in task development"));
+        debug!("❌ All {} attempts failed for task development", max_retries);
+        
         let execution_time = start_time.elapsed().as_millis() as u64;
-        self.update_statistics("task_development", model, execution_time, true);
-
-        debug!("✅ Task development completed for: {}", task_title);
-        debug!("   🎬 Generated {} actions", parsed_response.actions.len());
-
-        Ok(parsed_response)
+        self.update_statistics("task_development", model, execution_time, false);
+        
+        Err(final_error)
     }
 
     /// Execute feature development prompt
