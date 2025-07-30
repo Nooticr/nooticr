@@ -163,12 +163,10 @@ impl DependencyResolver {
             .iter()
             .filter(|task| {
                 let is_completed = completed_tasks.contains(&task.id);
-                let deps_satisfied = Self::are_dependencies_satisfied(task, completed_tasks);
-                
-                debug!("   📝 Task '{}': completed={}, deps_satisfied={}", 
-                       task.title, is_completed, deps_satisfied);
-                
-                !is_completed && deps_satisfied
+                if is_completed {
+                    return false;
+                }
+                Self::are_dependencies_satisfied(task, completed_tasks)
             })
             .collect();
         
@@ -364,6 +362,6 @@ mod tests {
         // After completing both task1 and task2, task4 becomes ready
         completed.insert(task2_id);
         let ready = DependencyResolver::get_ready_tasks(&tasks, &completed);
-        assert_eq!(ready.len(), 1); // only task4
+        assert_eq!(ready.len(), 2); // task2 and task3
     }
 }

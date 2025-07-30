@@ -1,13 +1,13 @@
 use super::agent_status_change::AgentStatusChange;
-use super::agent_error_recovery::{ActionError, ErrorRecoveryContext, ErrorRecoveryResponse, FileContext};
+use super::agent_error_recovery::{ActionError, ErrorRecoveryResponse, FileContext};
 use crate::enums::{AgentStatus, AgentType};
 use crate::error::{OrchestratorError, Result};
 use crate::managers::McpClient;
 use crate::prompts::Prompts;
+use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tracing::debug;
@@ -295,8 +295,8 @@ impl Agent {
                     if line.starts_with("description:") {
                         let description = line.trim_start_matches("description:")
                             .trim()
-                            .trim_matches('"')
                             .trim_matches('\'')
+                            .trim_matches('"')
                             .to_string();
                         if !description.is_empty() {
                             return description;
@@ -552,24 +552,24 @@ impl Agent {
     /// Collect relevant project files for error context
     async fn collect_relevant_files(
         &self, 
-        project_path: &PathBuf, 
+        project_path: &Path, 
         error: &ActionError,
         max_files: usize
     ) -> Result<Vec<FileContext>> {
         let mut relevant_files = Vec::new();
         
         // Collect files based on error context
-        let search_patterns = match error.action_type.as_str() {
-            "CommandExecution" => vec!["package.json", "Cargo.toml", "requirements.txt", "*.config.*"],
+        let search_patterns: Vec<String> = match error.action_type.as_str() {
+            "CommandExecution" => vec!["package.json", "Cargo.toml", "requirements.txt", "*.config.*"].into_iter().map(String::from).collect(),
             "FileOperation" => {
                 if let Some(working_dir) = &error.working_directory {
                     let parent = working_dir.parent().unwrap_or(working_dir);
-                    vec![&parent.to_string_lossy()]
+                    vec![parent.to_string_lossy().to_string()]
                 } else {
-                    vec!["src/*", "*.json", "*.toml", "*.yaml"]
+                    vec!["src/*", "*.json", "*.toml", "*.yaml"].into_iter().map(String::from).collect()
                 }
             },
-            _ => vec!["*.json", "*.toml", "*.yaml", "*.md", "src/*"],
+            _ => vec!["*.json", "*.toml", "*.yaml", "*.md", "src/*"].into_iter().map(String::from).collect(),
         };
 
         // Try to collect files matching patterns
@@ -580,9 +580,9 @@ impl Agent {
 
             // Simple pattern matching for common files
             let files_to_check = if pattern.contains('*') {
-                self.glob_files(project_path, pattern).await.unwrap_or_default()
+                self.glob_files(project_path, &pattern).await.unwrap_or_default()
             } else {
-                vec![project_path.join(pattern)]
+                vec![project_path.join(&pattern)]
             };
 
             for file_path in files_to_check {
@@ -591,7 +591,7 @@ impl Agent {
                 }
 
                 if file_path.exists() && file_path.is_file() {
-                    match FileContext::from_path(file_path, project_path).await {
+                    match FileContext::from_path(file_path.clone(), &project_path.to_path_buf()).await {
                         Ok(mut file_context) => {
                             file_context.truncate_content(2000); // Limit content size
                             relevant_files.push(file_context);
@@ -606,13 +606,19 @@ impl Agent {
     }
 
     /// Simple glob-like file matching
-    async fn glob_files(&self, base_path: &PathBuf, pattern: &str) -> Result<Vec<PathBuf>> {
+    async fn glob_files(&self, base_path: &Path, pattern: &str) -> Result<Vec<PathBuf>> {
         let mut files = Vec::new();
         
         // Handle simple patterns like "*.json", "src/*"
-        if pattern.starts_with("*.") {
+        if pattern.starts_with("*.{") {
+            let extensions_str = &pattern[3..pattern.len()-1];
+            let extensions: Vec<&str> = extensions_str.split(',').map(|s| s.trim()).collect();
+            for ext in extensions {
+                self.collect_files_by_extension(&base_path.to_path_buf(), ext, &mut files).await?;
+            }
+        } else if pattern.starts_with("*.") {
             let extension = &pattern[2..];
-            self.collect_files_by_extension(base_path, extension, &mut files).await?;
+            self.collect_files_by_extension(&base_path.to_path_buf(), extension, &mut files).await?;
         } else if pattern.ends_with("/*") {
             let dir_name = &pattern[..pattern.len()-2];
             let dir_path = base_path.join(dir_name);
@@ -631,6 +637,7 @@ impl Agent {
     }
 
     /// Collect files by extension recursively
+    #[async_recursion]
     async fn collect_files_by_extension(
         &self, 
         dir: &PathBuf, 
@@ -656,7 +663,7 @@ impl Agent {
     }
 
     /// Collect files in a specific directory
-    async fn collect_files_in_directory(&self, dir: &PathBuf, files: &mut Vec<PathBuf>) -> Result<()> {
+    async fn collect_files_in_directory(&self, dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let path = entry.path();
@@ -669,7 +676,7 @@ impl Agent {
     }
 
     /// Build project structure snapshot
-    async fn build_project_structure(&self, project_path: &PathBuf) -> Vec<String> {
+    async fn build_project_structure(&self, project_path: &Path) -> Vec<String> {
         let mut structure = Vec::new();
         
         if let Ok(entries) = std::fs::read_dir(project_path) {
@@ -684,7 +691,7 @@ impl Agent {
                     if matches!(name.as_str(), "src" | "lib" | "app" | "components") {
                         if let Ok(sub_entries) = std::fs::read_dir(&path) {
                             for sub_entry in sub_entries.flatten().take(5) {
-                                let sub_name = sub_entry.file_name().to_string_lossy();
+                                let sub_name = sub_entry.file_name().to_string_lossy().to_string();
                                 structure.push(format!("  {}/{}", name, sub_name));
                             }
                         }
@@ -746,7 +753,7 @@ impl Agent {
             &last_error.action_description,
             &last_error.error_message,
             last_error.error_code,
-            last_error.working_directory.as_deref().map(|p| p.to_string_lossy().as_ref()),
+            last_error.working_directory.as_deref().map(|p| p.to_string_lossy().into_owned()).as_deref(),
             last_error.retry_count,
             last_error.stdout.as_deref(),
             last_error.stderr.as_deref(),
@@ -815,8 +822,7 @@ impl Agent {
 
     /// Get recovery statistics
     pub fn get_recovery_stats(&self) -> (u32, u32, Option<DateTime<Utc>>) {
-        (
-            self.recovery_attempts,
+        (self.recovery_attempts,
             self.recent_errors.len() as u32,
             self.last_error_recovery_at,
         )

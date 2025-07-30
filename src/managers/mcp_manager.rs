@@ -3,6 +3,7 @@ use crate::mcp::gemini::GeminiCLI;
 use crate::models::prompt_responses::*;
 use crate::models::code_review::CodeReviewInput;
 use crate::models::conflict_resolution::ConflictResolutionInput;
+use crate::models::agent_error_recovery::ErrorRecoveryResponse;
 use crate::enums::TechStack;
 use crate::prompts::Prompts;
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,12 @@ pub enum McpCommand {
         merge_commit_message: String,
         model: McpModel,
         respond_to: oneshot::Sender<Result<ConflictResolutionInput>>,
+    },
+    /// Execute agent error recovery analysis
+    ErrorRecovery {
+        prompt: String,
+        model: McpModel,
+        respond_to: oneshot::Sender<Result<ErrorRecoveryResponse>>,
     },
     /// Execute CI/CD fix prompt
     CiCdFix {
@@ -366,6 +373,10 @@ impl McpManager {
                     .await;
                 let _ = respond_to.send(result);
             }
+            McpCommand::ErrorRecovery { prompt, model, respond_to } => {
+                let result = self.execute_error_recovery_analysis(&prompt, model).await;
+                let _ = respond_to.send(result);
+            }
             _ => {
                 // Handle other commands in the next part
                 warn!("Command not yet implemented");
@@ -377,6 +388,23 @@ impl McpManager {
     /// Get current statistics
     pub fn get_statistics(&self) -> McpStatistics {
         self.statistics.clone()
+    }
+
+    /// Execute agent error recovery analysis
+    async fn execute_error_recovery_analysis(
+        &mut self,
+        prompt: &str,
+        model: McpModel,
+    ) -> Result<ErrorRecoveryResponse> {
+        let start_time = std::time::Instant::now();
+
+        let response = self.execute_prompt(prompt, model.clone()).await?;
+        let parsed_response: ErrorRecoveryResponse = self.parse_json_response(&response)?;
+
+        let execution_time = start_time.elapsed().as_millis() as u64;
+        self.update_statistics("error_recovery_analysis", model, execution_time, true);
+
+        Ok(parsed_response)
     }
 
     /// Initialize context files for a project
@@ -428,7 +456,9 @@ impl McpManager {
             TechStack::FullstackRustReact => "context.react.md", // Use React context for fullstack
         };
 
-        let context_path = PathBuf::from("contexts").join(context_filename);
+        let mut context_path = PathBuf::from(".");
+        context_path.push("contexts");
+        context_path.push(context_filename);
         
         debug!("🔍 Attempting to load context from: {:?}", context_path);
         
@@ -969,6 +999,23 @@ impl McpClient {
             branch_info,
             context,
             merge_commit_message,
+            model,
+            respond_to: tx,
+        }).map_err(|e| OrchestratorError::channel(format!("Failed to send command: {}", e)))?;
+
+        rx.await.map_err(|_| OrchestratorError::internal("MCP Manager disconnected"))?
+    }
+
+    /// Execute agent error recovery analysis
+    pub async fn error_recovery_analysis(
+        &self,
+        prompt: String,
+        model: McpModel,
+    ) -> Result<ErrorRecoveryResponse> {
+        let (tx, rx) = oneshot::channel();
+
+        self.command_tx.send(McpCommand::ErrorRecovery {
+            prompt,
             model,
             respond_to: tx,
         }).map_err(|e| OrchestratorError::channel(format!("Failed to send command: {}", e)))?;

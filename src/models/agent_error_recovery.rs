@@ -175,14 +175,16 @@ impl FileContext {
     /// Check if file is likely generated (based on common patterns)
     fn is_generated_file(path: &PathBuf) -> bool {
         let path_str = path.to_string_lossy().to_lowercase();
-        
+        let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+
         // Common generated file patterns
         path_str.contains("node_modules") ||
         path_str.contains("target") ||
         path_str.contains("build") ||
         path_str.contains("dist") ||
         path_str.contains(".git") ||
-        path_str.ends_with(".lock") ||
+        file_name == "cargo.lock" ||
+        file_name == "package-lock.json" ||
         path_str.ends_with(".map") ||
         path_str.contains("__pycache__") ||
         path_str.contains(".cache")

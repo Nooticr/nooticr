@@ -187,7 +187,7 @@ impl GeminiCLI {
         }
         
         let output = command
-            .args(&["--model", model, "-p", prompt])
+            .args(&["gen", "-m", model, "-p", prompt])
             .output()
             .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
@@ -234,8 +234,7 @@ impl GeminiCLI {
     pub async fn query_with_temperature(prompt: &str, temperature: f32) -> Result<String> {
         let temp_str = temperature.to_string();
         let output = Command::new("gemini")
-            .args(&["--format", "json", "--temperature", &temp_str])
-            .arg(prompt)
+            .args(&["gen", "-t", &temp_str, "-p", prompt])
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
@@ -260,7 +259,7 @@ impl GeminiCLI {
     /// List available Gemini models
     pub async fn list_models() -> Result<Vec<String>> {
         let output = Command::new("gemini")
-            .args(&["--list-models"])
+            .args(&["models", "list"])
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())

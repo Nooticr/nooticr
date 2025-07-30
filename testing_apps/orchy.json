@@ -1,0 +1,798 @@
+{
+  "id": "30669209-80ff-4b36-b383-3ad09bd039cf",
+  "idea": "a todo app with a ability to add, edit, remove",
+  "name": "vue_todo_app",
+  "repository_url": null,
+  "project_path": "testing_apps",
+  "status": "Planning",
+  "tech_stack": "Vue",
+  "tasks": [
+    {
+      "id": "c9478c1d-437b-4d7c-996f-44e567c45d5b",
+      "title": "Define Core Features & User Stories",
+      "description": "Conduct a detailed requirements analysis to define the core functionalities of the todo application: adding new todos, editing existing todos, marking todos as complete/incomplete, and deleting todos. Map out user stories and acceptance criteria for each feature.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.502048214Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "Critical",
+      "estimated_complexity": 4,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.502048214Z",
+      "updated_at": "2025-07-30T12:01:58.502048214Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "planning",
+        "requirements",
+        "user-stories"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "645f3327-761b-4597-9ccb-bc9027063f00",
+      "title": "Design System Architecture & Technology Stack Confirmation",
+      "description": "Confirm the overall system architecture, including the use of Vue.js as the frontend framework, Pinia for state management, shadcn-vue and Tailwind CSS for UI components, and Playwright for E2E testing. Decide on Mock Service Worker (MSW) for simulating API interactions during development.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.502253616Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "Critical",
+      "estimated_complexity": 5,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.502253616Z",
+      "updated_at": "2025-07-30T12:01:58.502253616Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "architecture",
+        "tech-stack",
+        "design"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "4584dac6-0c89-4f3f-8d93-fce1d48e6f1c",
+      "title": "Define Data Model & API Endpoints",
+      "description": "Design the data model for a `Todo` item, including properties like `id`, `title`, and `completed`. Specify the REST-like API endpoints for CRUD operations on todos (e.g., `GET /todos`, `POST /todos`, `PUT /todos/:id`, `DELETE /todos/:id`).",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.502422213Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 4,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.502422213Z",
+      "updated_at": "2025-07-30T12:01:58.502422213Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "data-model",
+        "api-design"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "dff10751-74ba-4106-a8fc-24b4800d013a",
+      "title": "Project Setup & Development Environment Configuration",
+      "description": "Initialize a new Vue project using Vite. Configure ESLint and Prettier for code quality and formatting. Set up basic folder structure as per the project context (e.g., `src/stores`, `src/components`, `src/pages`, `src/interfaces`).",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.502516777Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "Critical",
+      "estimated_complexity": 6,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.502516777Z",
+      "updated_at": "2025-07-30T12:01:58.502516777Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "setup",
+        "environment",
+        "tooling"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "5f7b05e9-8c4d-46fd-9eeb-ad6940984f69",
+      "title": "Implement Mock API with MSW",
+      "description": "Set up Mock Service Worker (MSW) to intercept API requests and provide mock responses for the defined todo API endpoints (GET, POST, PUT, DELETE). This will allow frontend development to proceed independently of a real backend.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.502682231Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 7,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.502682231Z",
+      "updated_at": "2025-07-30T12:01:58.502682231Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "mock-api",
+        "msw",
+        "backend-simulation"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "d6c75026-243b-4ef8-a2c2-943a86ae9e5f",
+      "title": "Implement Core UI Components (shadcn-vue & Tailwind CSS)",
+      "description": "Integrate shadcn-vue and Tailwind CSS into the project. Create foundational UI components such as `Button`, `Input`, `Checkbox`, and a basic `Card` component, adhering to the project's design system principles.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.502873316Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 6,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.502873316Z",
+      "updated_at": "2025-07-30T12:01:58.502873316Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "ui",
+        "components",
+        "shadcn-vue",
+        "tailwind"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "2a468c54-db56-4e5c-ae44-62c516ef49f4",
+      "title": "Develop Pinia Store for Todo Management",
+      "description": "Create a Pinia store (`useTodoStore`) to manage the state of todo items. Implement actions for fetching all todos, adding a new todo, updating an existing todo (title, completed status), and deleting a todo. These actions will interact with the (mock) API.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.502958312Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 8,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.502958312Z",
+      "updated_at": "2025-07-30T12:01:58.502958312Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "state-management",
+        "pinia",
+        "store"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "12e4f259-b614-4a60-ad23-f7bed7bc9869",
+      "title": "Implement Todo List Display Component",
+      "description": "Create a Vue component (`TodoList.vue`) responsible for displaying the list of todo items fetched from the Pinia store. Each todo item should be rendered using a separate `TodoItem.vue` component, allowing for individual editing, completion toggling, and deletion.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503031087Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 7,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503031087Z",
+      "updated_at": "2025-07-30T12:01:58.503031087Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "components",
+        "ui",
+        "todo-list"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "6e63e9a3-a080-49ce-befc-ff2601514ea7",
+      "title": "Implement Add/Edit Todo Form Component",
+      "description": "Create a reusable Vue component (`TodoForm.vue`) that allows users to add new todo items and edit existing ones. This component should include an input field for the todo title and a submit button. It will interact with the Pinia store to perform add/update operations.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503074668Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 7,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503074668Z",
+      "updated_at": "2025-07-30T12:01:58.503074668Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "components",
+        "ui",
+        "forms"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "04053813-726d-4a86-9743-3021ea3530b0",
+      "title": "Integrate Components into Main Application Page & Routing",
+      "description": "Assemble the `TodoList` and `TodoForm` components into the main application page (`HomePage.vue`). Set up Vue Router to handle the main route (`/`). Ensure proper data flow between components and the Pinia store.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503110985Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 6,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503110985Z",
+      "updated_at": "2025-07-30T12:01:58.503110985Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "pages",
+        "routing",
+        "integration"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "ffa338bb-7c1c-43d3-abdb-5a3086e68615",
+      "title": "Implement Responsive Design & Basic Accessibility",
+      "description": "Ensure the application's UI is responsive across different screen sizes (mobile, tablet, desktop) using Tailwind CSS utilities. Implement basic accessibility features, such as proper semantic HTML, ARIA attributes where necessary, and keyboard navigation for interactive elements.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503152959Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "Medium",
+      "estimated_complexity": 6,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503152959Z",
+      "updated_at": "2025-07-30T12:01:58.503152959Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "responsive-design",
+        "accessibility",
+        "ux"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "dd58f683-169a-4b10-bd9c-a1ad0a284343",
+      "title": "Develop Unit & Integration Tests",
+      "description": "Write unit tests for the Pinia todo store using a testing framework (e.g., Vitest) to ensure actions, getters, and state mutations work as expected. Implement integration tests for key Vue components (`TodoList`, `TodoForm`) using Vue Test Utils to verify component interactions and rendering.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503183899Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 8,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503183899Z",
+      "updated_at": "2025-07-30T12:01:58.503183899Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "testing",
+        "unit-tests",
+        "integration-tests",
+        "vitest",
+        "vue-test-utils"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "83bc2d88-5431-4094-bb72-aa16352a1b76",
+      "title": "Implement End-to-End (E2E) Tests with Playwright",
+      "description": "Write comprehensive end-to-end tests using Playwright to simulate real user interactions for core functionalities: adding a todo, marking it complete, editing its title, and deleting it. Tests should run against the application with the MSW mock API enabled.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503221054Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 9,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503221054Z",
+      "updated_at": "2025-07-30T12:01:58.503221054Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "e2e-testing",
+        "playwright"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "dbe8f093-3313-4935-8e22-f161ec4c30ce",
+      "title": "Configure CI/CD Pipeline for Linting, Type Checking, and Testing",
+      "description": "Set up a GitHub Actions workflow to automate code quality checks (ESLint, Prettier), TypeScript type checking, and execution of unit, integration, and E2E tests on every push to the main branch and pull requests.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503256883Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "High",
+      "estimated_complexity": 8,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503256883Z",
+      "updated_at": "2025-07-30T12:01:58.503256883Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "ci/cd",
+        "github-actions",
+        "automation"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "446b6efc-3aab-404e-8b90-9f0eb5b943b2",
+      "title": "Dockerization for Production Deployment",
+      "description": "Create a `Dockerfile` for the Vue application to enable containerized deployment. The Dockerfile should include stages for building the application and serving it with Nginx.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503293410Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "Medium",
+      "estimated_complexity": 7,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503293410Z",
+      "updated_at": "2025-07-30T12:01:58.503293410Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "docker",
+        "deployment",
+        "containerization"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "82cded7c-90cb-452b-b2e2-2aff42a825c1",
+      "title": "Basic Performance Optimization & Auditing",
+      "description": "Conduct basic performance audits using browser developer tools (e.g., Lighthouse) to identify potential bottlenecks. Implement minor optimizations such as lazy loading (if applicable for future features) or image optimization.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503329448Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "Low",
+      "estimated_complexity": 6,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503329448Z",
+      "updated_at": "2025-07-30T12:01:58.503329448Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "performance",
+        "optimization",
+        "auditing"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    },
+    {
+      "id": "35775bd3-93b4-4674-8425-e690eb71740f",
+      "title": "Documentation & Release Preparation",
+      "description": "Create a `README.md` file with project setup instructions, how to run the application, and basic usage. Document the API endpoints (even if mock) and deployment steps. Prepare for a potential release by ensuring versioning is in place.",
+      "status": "Pending",
+      "status_history": [
+        [
+          "Pending",
+          "2025-07-30T12:01:58.503364298Z"
+        ]
+      ],
+      "rapporter": null,
+      "assigned_to": null,
+      "priority": "Medium",
+      "estimated_complexity": 5,
+      "estimated_duration": null,
+      "created_at": "2025-07-30T12:01:58.503364298Z",
+      "updated_at": "2025-07-30T12:01:58.503364298Z",
+      "completed_at": null,
+      "due_date": null,
+      "tags": [
+        "documentation",
+        "release",
+        "handover"
+      ],
+      "comments": [],
+      "depends_on": [],
+      "pull_request": null
+    }
+  ],
+  "issues": [],
+  "agents": [
+    {
+      "id": "5ba2db58-afb6-425d-b910-569d50a41bd7",
+      "name": "Backend Engineer Rust",
+      "file_path": "embedded://backend_engineer_rust.md",
+      "description": "Specialist in high-performance Rust backend systems. Use for API development, system optimization, or infrastructure tasks.",
+      "agent_type": "BackendEngineerRust",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520026216Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520026216Z",
+      "updated_at": "2025-07-30T12:01:10.520026216Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "eca304fd-702d-420b-9431-b6aabf801e4a",
+      "name": "Backend Qa Rust",
+      "file_path": "embedded://backend_qa_rust.md",
+      "description": "Rust backend testing specialist. Focuses on API contracts, load testing, and security. Use before deployments.",
+      "agent_type": "BackendQARust",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520033480Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520033480Z",
+      "updated_at": "2025-07-30T12:01:10.520033480Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "a6e8b6e8-43c4-4b01-ace6-8798525c287e",
+      "name": "Codereview Eng",
+      "file_path": "embedded://codereview_eng.md",
+      "description": "Specialist in cross-stack code reviews for Rust, React & Vue. Ensures code quality, security, and maintainability.",
+      "agent_type": "CodeReviewEngineer",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520038229Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520038229Z",
+      "updated_at": "2025-07-30T12:01:10.520038229Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "c86d5eaa-c0e5-455a-a437-1037ad663311",
+      "name": "Devops",
+      "file_path": "embedded://devops.md",
+      "description": "Infrastructure and deployment specialist. Ensures reliable CI/CD, cloud infrastructure, and monitoring. Use for deployment tasks and environment configuration.",
+      "agent_type": "DevOps",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520042489Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520042489Z",
+      "updated_at": "2025-07-30T12:01:10.520042489Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "bf83dd71-7597-48a2-9d93-260a18e87390",
+      "name": "Frontend Engineer React",
+      "file_path": "embedded://frontend_engineer_react.md",
+      "description": "Specialist in React applications. Use for component libraries, hooks implementation, or performance optimization.",
+      "agent_type": "FrontendEngineerReact",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520047657Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520047657Z",
+      "updated_at": "2025-07-30T12:01:10.520047657Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "f834b5b8-7f1d-4541-a486-29bc94b42ece",
+      "name": "Frontend Engineer Vue",
+      "file_path": "embedded://frontend_engineer_vue.md",
+      "description": "Specialist in Vue.js applications. Use for SPA development, state management, or UI/UX implementation.",
+      "agent_type": "FrontendEngineerVue",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520051988Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520051988Z",
+      "updated_at": "2025-07-30T12:01:10.520051988Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "b7f60ef6-3cf3-4a7e-876a-ef6f5f136b3c",
+      "name": "Frontend Qa React",
+      "file_path": "embedded://frontend_qa_react.md",
+      "description": "Specialist in testing React applications. Use for test automation, user flow validation, or quality gates.",
+      "agent_type": "FrontendQAReact",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520056248Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520056248Z",
+      "updated_at": "2025-07-30T12:01:10.520056248Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "5a9ef4d0-5b64-4705-95b4-86b772a2f84f",
+      "name": "Frontend Qa Vue",
+      "file_path": "embedded://frontend_qa_vue.md",
+      "description": "Specialist in testing Vue.js applications. Use for test strategy, E2E testing, or quality assurance.",
+      "agent_type": "FrontendQAVue",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520097384Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520097384Z",
+      "updated_at": "2025-07-30T12:01:10.520097384Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "5390b00f-1041-493b-a76c-f6ffe9a6ae51",
+      "name": "Performance Engineer",
+      "file_path": "embedded://performance_engineer.md",
+      "description": "Full-stack performance optimization specialist. Use when addressing speed or scalability concerns.",
+      "agent_type": "PerformanceEngineer",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520105905Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520105905Z",
+      "updated_at": "2025-07-30T12:01:10.520105905Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "ae2d4fe5-27b5-46df-93a7-83a58809906d",
+      "name": "Release Mmanager",
+      "file_path": "embedded://release_mmanager.md",
+      "description": "Release coordination specialist. Manages versioning and deployment workflows. Use during release cycles.",
+      "agent_type": "ReleaseManager",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520111073Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520111073Z",
+      "updated_at": "2025-07-30T12:01:10.520111073Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    },
+    {
+      "id": "980a48da-47dc-473d-b5fa-6d10168fd3cc",
+      "name": "Security Engineer",
+      "file_path": "embedded://security_engineer.md",
+      "description": "Application security specialist. Conducts penetration testing and vulnerability scanning. Use before production releases.",
+      "agent_type": "SecurityEngineer",
+      "status": "Idle",
+      "status_history": [
+        {
+          "from": null,
+          "to": "Idle",
+          "reason": "Agent created",
+          "timestamp": "2025-07-30T12:01:10.520115752Z"
+        }
+      ],
+      "created_at": "2025-07-30T12:01:10.520115752Z",
+      "updated_at": "2025-07-30T12:01:10.520115752Z",
+      "last_active_at": null,
+      "error_count": 0,
+      "total_tasks_completed": 0,
+      "recent_errors": [],
+      "recovery_attempts": 0,
+      "last_error_recovery_at": null,
+      "autonomous_recovery_enabled": true,
+      "max_recovery_attempts": 3
+    }
+  ],
+  "tasks_history": [],
+  "created_at": "2025-07-30T12:01:10.519989480Z",
+  "updated_at": "2025-07-30T12:01:58.503378686Z",
+  "dependencies_urls": null
+}
