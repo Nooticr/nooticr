@@ -103,3 +103,4 @@ pub mod models;
 pub mod prompts;
 pub mod managers;
 pub mod utils;
+pub mod database;

@@ -4,6 +4,7 @@ use crate::models::agent::Agent;
 use crate::models::issue::Issue;
 use crate::enums::{TaskStatus, AgentStatus, IssueStatus, IssueType, CommentType};
 use crate::error::{OrchestratorError, Result};
+use crate::database::{Database, repository::ProjectRepository};
 use std::sync::Arc;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, RwLock, broadcast};
@@ -195,6 +196,7 @@ pub struct ProjectManager {
     project: Arc<RwLock<Project>>,
     command_sender: mpsc::UnboundedSender<ProjectCommand>,
     event_broadcaster: broadcast::Sender<ProjectEvent>,
+    repository: Option<ProjectRepository>,
 }
 
 impl ProjectManager {
@@ -209,6 +211,7 @@ impl ProjectManager {
             project: project.clone(),
             command_sender,
             event_broadcaster: event_broadcaster.clone(),
+            repository: None, // Will be set when database is initialized
         };
         
         // Spawn the background task to handle commands
@@ -224,6 +227,19 @@ impl ProjectManager {
     /// Subscribe to project events
     pub fn subscribe_to_events(&self) -> broadcast::Receiver<ProjectEvent> {
         self.event_broadcaster.subscribe()
+    }
+
+    /// Initialize database for the project
+    pub fn with_database(mut self, db_path: PathBuf) -> Result<Self> {
+        let database = Database::new(db_path)?;
+        self.repository = Some(ProjectRepository::new(database));
+        Ok(self)
+    }
+
+    /// Create a new project manager with database support
+    pub fn new_with_database(project: Project, db_path: PathBuf) -> Result<Self> {
+        let manager = Self::new(project);
+        manager.with_database(db_path)
     }
     
     /// Get a sender for project commands
@@ -381,38 +397,38 @@ impl ProjectManager {
         Ok(Self::new(created_project))
     }
 
-    /// Save the current project state
+    /// Save the current project state to database
     pub async fn save_project(&self) -> Result<()> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        self.command_sender.send(ProjectCommand::SaveProject {
-            respond_to: tx
-        }).map_err(|_| OrchestratorError::internal("Failed to send save project command"))?;
+        // Always use database
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).map_err(OrchestratorError::Io)?;
+        }
 
-        rx.recv().await
-            .ok_or_else(|| OrchestratorError::internal("Failed to receive save response"))?
+        let database = Database::new(&db_path)?;
+        let repository = ProjectRepository::new(database);
+        Self::handle_save_project_to_database(&self.project, &repository).await
     }
 
-    /// Load a project from the specified path
+    /// Load a project from the specified path using database
     pub async fn load_project(path: std::path::PathBuf) -> Result<Self> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        
-        // Create temporary manager for loading
-        let temp_project = Project::new("temp", "temp", path.to_str().unwrap_or(""));
-        let temp_manager = Self::new(temp_project);
-        
-        temp_manager.command_sender.send(ProjectCommand::LoadProject {
-            path,
-            respond_to: tx,
-        }).map_err(|_| OrchestratorError::internal("Failed to send load project command"))?;
+        let project_path_str = path.to_string_lossy().to_string();
+        let db_path = crate::utils::cli::get_default_database_path();
 
-        let loaded_project = rx.recv().await
-            .ok_or_else(|| OrchestratorError::internal("Failed to receive load response"))??;
-        
-        // Shutdown temporary manager
-        temp_manager.shutdown().await;
-        
-        // Return new manager with loaded project
-        Ok(Self::new(loaded_project))
+        Self::load_project_from_database(&project_path_str, db_path).await
+    }
+
+    /// Load a project from database
+    pub async fn load_project_from_database(project_path: &str, db_path: PathBuf) -> Result<Self> {
+        let database = Database::new(db_path)?;
+        let repository = ProjectRepository::new(database);
+
+        let loaded_project = Self::handle_load_project_from_database(project_path, &repository).await?;
+
+        let mut manager = Self::new(loaded_project);
+        manager.repository = Some(repository);
+
+        Ok(manager)
     }
 
     /// Execute all tasks in dependency order
@@ -565,7 +581,22 @@ impl ProjectManager {
                 }
 
                 ProjectCommand::SaveProject { respond_to } => {
-                    let result = Self::handle_save_project(&project).await;
+                    // Use database save method
+                    let db_path = crate::utils::cli::get_default_database_path();
+
+                    // Ensure directory exists
+                    if let Some(parent) = db_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+
+                    let result = match Database::new(&db_path) {
+                        Ok(database) => {
+                            let repository = ProjectRepository::new(database);
+                            Self::handle_save_project_to_database(&project, &repository).await
+                        },
+                        Err(e) => Err(e)
+                    };
+
                     let _ = respond_to.send(result);
                 }
 
@@ -1396,17 +1427,25 @@ impl ProjectManager {
             available_agents
         };
 
-        // Save project configuration IMMEDIATELY after initial setup (before MCP call)
-        let config_path = project_path.join("orchy.json");
-        debug!("💾 ProjectManager: Saving initial project configuration to: {}", config_path.display());
-        
-        let initial_project_json = serde_json::to_string_pretty(&*project_guard)
-            .map_err(OrchestratorError::Json)?;
-        debug!("📄 ProjectManager: Initial project JSON size: {} bytes", initial_project_json.len());
-        
-        fs::write(&config_path, &initial_project_json)
-            .map_err(OrchestratorError::Io)?;
-        debug!("✅ ProjectManager: Initial project configuration saved successfully");
+        // Save project configuration IMMEDIATELY after initial setup to database
+        debug!("💾 ProjectManager: Saving initial project configuration to database");
+
+        // Use default database path
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).map_err(OrchestratorError::Io)?;
+        }
+
+        let database = Database::new(&db_path).map_err(|e| {
+            debug!("Warning: Failed to save to database: {}", e);
+            e
+        })?;
+        let repository = ProjectRepository::new(database);
+        repository.save_project(&*project_guard).map_err(|e| {
+            debug!("Warning: Failed to save project to database: {}", e);
+            e
+        })?;
+        debug!("✅ ProjectManager: Initial project configuration saved to database successfully");
 
         drop(project_guard); // Release the write lock
 
@@ -1464,17 +1503,25 @@ impl ProjectManager {
 
         debug!("📊 ProjectManager: Project now has {} tasks total", project_guard.tasks.len());
 
-        // Save project configuration IMMEDIATELY after tasks are added
-        let config_path = project_path.join("orchy.json");
-        debug!("💾 ProjectManager: Saving project configuration to: {}", config_path.display());
-        
-        let project_json = serde_json::to_string_pretty(&*project_guard)
-            .map_err(OrchestratorError::Json)?;
-        debug!("📄 ProjectManager: Project JSON size: {} bytes", project_json.len());
-        
-        fs::write(&config_path, &project_json)
-            .map_err(OrchestratorError::Io)?;
-        debug!("✅ ProjectManager: Project configuration saved successfully");
+        // Save project configuration IMMEDIATELY after tasks are added to database
+        debug!("💾 ProjectManager: Saving project configuration to database");
+
+        // Use default database path
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).map_err(OrchestratorError::Io)?;
+        }
+
+        let database = Database::new(&db_path).map_err(|e| {
+            debug!("Warning: Failed to save to database: {}", e);
+            e
+        })?;
+        let repository = ProjectRepository::new(database);
+        repository.save_project(&*project_guard).map_err(|e| {
+            debug!("Warning: Failed to save project to database: {}", e);
+            e
+        })?;
+        debug!("✅ ProjectManager: Project configuration saved to database successfully");
 
         // Emit project creation event
         let _ = event_broadcaster.send(ProjectEvent::ProjectStatusChanged {
@@ -1487,52 +1534,62 @@ impl ProjectManager {
         drop(project_guard);
 
         debug!("✅ ProjectManager: Project '{}' created successfully!", name);
-        debug!("📁 ProjectManager: Project saved to: {}", config_path.display());
+        debug!("📁 ProjectManager: Project saved to database");
         debug!("🆔 ProjectManager: Project ID: {}", result_project.id);
         debug!("📊 ProjectManager: Tasks created: {}", result_project.tasks.len());
 
         Ok(result_project)
     }
 
-    /// Handle saving project to disk
-    async fn handle_save_project(project: &Arc<RwLock<Project>>) -> Result<()> {
-        use std::fs;
-        use std::path::PathBuf;
 
+
+    /// Handle saving project to database
+    async fn handle_save_project_to_database(
+        project: &Arc<RwLock<Project>>,
+        repository: &ProjectRepository
+    ) -> Result<()> {
         let project_guard = project.read().await;
-        let project_path = PathBuf::from(&project_guard.project_path);
-        let config_path = project_path.join("orchy.json");
-        
-        debug!("💾 ProjectManager: Saving project to: {}", config_path.display());
-        
-        let project_json = serde_json::to_string_pretty(&*project_guard)
-            .map_err(OrchestratorError::Json)?;
-        
-        fs::write(&config_path, project_json)
-            .map_err(OrchestratorError::Io)?;
-        
-        debug!("✅ ProjectManager: Project saved successfully");
+
+        debug!("💾 ProjectManager: Saving project to database: {}", project_guard.name);
+
+        repository.save_project(&*project_guard)?;
+
+        debug!("✅ ProjectManager: Project saved to database successfully");
         Ok(())
     }
 
-    /// Handle loading project from disk
+    /// Handle loading project from database
     async fn handle_load_project(path: std::path::PathBuf) -> Result<Project> {
-        use std::fs;
+        debug!("📂 ProjectManager: Loading project from database for path: {:?}", path);
 
-        debug!("📂 ProjectManager: Loading project from: {:?}", path);
-        let config_path = path.join("orchy.json");
-        
-        if !config_path.exists() {
-            return Err(OrchestratorError::validation("Project configuration file (orchy.json) not found"));
+        let project_path_str = path.to_string_lossy().to_string();
+        let db_path = crate::utils::cli::get_default_database_path();
+
+        if !db_path.exists() {
+            return Err(OrchestratorError::validation("Database not found. Please create a project first."));
         }
 
-        let project_json = fs::read_to_string(&config_path)
-            .map_err(OrchestratorError::Io)?;
+        let database = Database::new(&db_path)?;
+        let repository = ProjectRepository::new(database);
 
-        let project: Project = serde_json::from_str(&project_json)
-            .map_err(OrchestratorError::Json)?;
+        let project = repository.load_project(&project_path_str)?;
 
         debug!("✅ ProjectManager: Successfully loaded project with {} tasks and {} agents",
+               project.tasks.len(), project.agents.len());
+
+        Ok(project)
+    }
+
+    /// Handle loading project from database
+    async fn handle_load_project_from_database(
+        project_path: &str,
+        repository: &ProjectRepository
+    ) -> Result<Project> {
+        debug!("📂 ProjectManager: Loading project from database: {}", project_path);
+
+        let project = repository.load_project(project_path)?;
+
+        debug!("✅ ProjectManager: Successfully loaded project from database with {} tasks and {} agents",
                project.tasks.len(), project.agents.len());
 
         Ok(project)
@@ -1655,12 +1712,25 @@ impl ProjectManager {
         debug!("   ✅ All dependencies satisfied");
         debug!("   ✅ All actions executed successfully");
 
-        // Save final project state
-        debug!("📊 ProjectManager: Saving final project state...");
-        if let Err(e) = Self::handle_save_project(project).await {
-            debug!("⚠️  ProjectManager: Failed to save final project state: {}", e);
-        } else {
-            debug!("✅ ProjectManager: Final project state saved successfully");
+        // Save final project state to database
+        debug!("📊 ProjectManager: Saving final project state to database...");
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        match Database::new(&db_path) {
+            Ok(database) => {
+                let repository = ProjectRepository::new(database);
+                if let Err(e) = Self::handle_save_project_to_database(project, &repository).await {
+                    debug!("⚠️  ProjectManager: Failed to save final project state: {}", e);
+                } else {
+                    debug!("✅ ProjectManager: Final project state saved to database successfully");
+                }
+            },
+            Err(e) => {
+                debug!("⚠️  ProjectManager: Failed to create database connection: {}", e);
+            }
         }
 
         debug!("🏁 ProjectManager: Task-by-task development process complete!");
@@ -1672,7 +1742,7 @@ impl ProjectManager {
         project: &Arc<RwLock<Project>>,
         task_id: Uuid,
         new_status: TaskStatus,
-        reason: String,
+        _reason: String,
         event_broadcaster: &broadcast::Sender<ProjectEvent>,
     ) {
         let mut project_guard = project.write().await;
