@@ -6,5 +6,6 @@ pub mod conflict_resolution;
 pub mod issue;
 pub mod issue_status_change;
 pub mod project;
+pub mod prompt_responses;
 pub mod pull_request;
 pub mod task;

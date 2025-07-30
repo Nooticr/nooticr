@@ -13,7 +13,7 @@ pub struct GeminiCLI;
 impl GeminiCLI {
     /// Check if Gemini CLI is available and working
     pub async fn is_available() -> bool {
-        match Command::new("gemini").arg("--version").output() {
+        match Command::new("gemini").arg("--version").output().await {
             Ok(output) => output.status.success(),
             Err(_) => false,
         }

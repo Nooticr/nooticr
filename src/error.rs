@@ -115,6 +115,10 @@ pub enum OrchestratorError {
     /// External service errors
     #[error("External service error: {service} - {message}")]
     ExternalService { service: String, message: String },
+
+    /// Channel communication errors
+    #[error("Channel communication error: {message}")]
+    Channel { message: String },
 }
 
 impl OrchestratorError {
@@ -261,6 +265,13 @@ impl OrchestratorError {
     pub fn external_service(service: impl Into<String>, message: impl Into<String>) -> Self {
         Self::ExternalService {
             service: service.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a channel communication error
+    pub fn channel(message: impl Into<String>) -> Self {
+        Self::Channel {
             message: message.into(),
         }
     }
