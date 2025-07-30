@@ -8,6 +8,7 @@ chrono = { version = "0.4.41", features = ["serde"] }
 clap = "4.5.41"
 derive = "1.0.0"
 dirs = "5.0.1"
+dotenv = "0.15.0"
 features = "0.10.0"
 hmac = "0.12.1"
 serde = { version = "1.0.219", features = ["derive"] }
@@ -16,6 +17,7 @@ sha2 = "0.10.9"
 thiserror = "2.0.12"
 tokio = { version = "1.47.0", features = ["full"] }
 tracing = "0.1.41"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 ratatui = "0.28"
 crossterm = "0.28"

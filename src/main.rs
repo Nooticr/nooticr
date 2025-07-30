@@ -1,58 +1,64 @@
 use clap::{Arg, Command};
 use orchy::utils::*;
+use tracing::debug;
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing subscriber
+    tracing_subscriber::fmt::init();
+    
+    // Load environment variables from .env file
+    dotenv::dotenv().ok();
     let app = build_cli();
     let matches = app.get_matches();
 
     match matches.subcommand() {
         Some(("create", sub_matches)) => {
             if let Err(e) = handle_create_project(sub_matches).await {
-                eprintln!("Error creating project: {}", e);
+                debug!("Error creating project: {}", e);
                 std::process::exit(1);
             }
         }
         Some(("list-tasks", _)) => {
             if let Err(e) = handle_list_tasks().await {
-                eprintln!("Error listing tasks: {}", e);
+                debug!("Error listing tasks: {}", e);
                 std::process::exit(1);
             }
         }
         Some(("list-agents", _)) => {
             if let Err(e) = handle_list_agents().await {
-                eprintln!("Error listing agents: {}", e);
+                debug!("Error listing agents: {}", e);
                 std::process::exit(1);
             }
         }
         Some(("list-issues", _)) => {
             if let Err(e) = handle_list_issues().await {
-                eprintln!("Error listing issues: {}", e);
+                debug!("Error listing issues: {}", e);
                 std::process::exit(1);
             }
         }
         Some(("add-sample-data", sub_matches)) => {
             if let Err(e) = handle_add_sample_data(sub_matches).await {
-                eprintln!("Error adding sample data: {}", e);
+                debug!("Error adding sample data: {}", e);
                 std::process::exit(1);
             }
         }
         Some(("tui", _)) | Some(("ui", _)) => {
             if let Err(e) = run_tui().await {
-                eprintln!("Error in TUI mode: {}", e);
+                debug!("Error in TUI mode: {}", e);
                 std::process::exit(1);
             }
         }
         Some(("add-agent", sub_matches)) => {
             if let Err(e) = handle_add_agent(sub_matches).await {
-                eprintln!("Error adding agent: {}", e);
+                debug!("Error adding agent: {}", e);
                 std::process::exit(1);
             }
         }
         _ => {
             // Default to TUI mode when no subcommand is provided
             if let Err(e) = run_tui().await {
-                eprintln!("Error in TUI mode: {}", e);
+                debug!("Error in TUI mode: {}", e);
                 std::process::exit(1);
             }
         }

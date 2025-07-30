@@ -11,6 +11,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use uuid::Uuid;
+use tracing::debug;
 
 /// Parse tech stack from string
 fn parse_tech_stack(tech_stack_str: &str) -> Result<TechStack, Box<dyn std::error::Error>> {
@@ -33,9 +34,9 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     let dependencies_urls = matches.get_one::<String>("dependencies-urls");
     let tech_stack_str = matches.get_one::<String>("tech-stack");
 
-    println!("🚀 Creating project: {}", name);
-    println!("💡 Idea: {}", idea);
-    println!("📁 Path: {}", path);
+    debug!("🚀 Creating project: {}", name);
+    debug!("💡 Idea: {}", idea);
+    debug!("📁 Path: {}", path);
 
     // Parse tech stack
     let tech_stack = if let Some(ts) = tech_stack_str {
@@ -44,33 +45,33 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
         TechStack::default()
     };
 
-    println!("🔧 Tech Stack: {:?}", tech_stack);
+    debug!("🔧 Tech Stack: {:?}", tech_stack);
 
     // Create project directory if it doesn't exist
     let project_path = PathBuf::from(path);
     if !project_path.exists() {
         fs::create_dir_all(&project_path)?;
-        println!("📂 Created project directory: {}", path);
+        debug!("📂 Created project directory: {}", path);
     }
 
     // Initialize MCP Manager
-    println!("🤖 Starting MCP Manager...");
-    let (mcp_manager, mcp_command_tx, mut mcp_event_rx) = McpManager::new();
+    debug!("🤖 Starting MCP Manager...");
+    let (mcp_manager, mcp_command_tx, _mcp_event_rx) = McpManager::new();
     let mcp_client = McpClient::new(mcp_command_tx.clone());
 
     // Start MCP Manager in background
     let mcp_handle = tokio::spawn(async move {
         if let Err(e) = mcp_manager.run().await {
-            eprintln!("MCP Manager error: {}", e);
+            debug!("MCP Manager error: {}", e);
         }
     });
 
     // Initialize context files
-    println!("📝 Initializing context files...");
+    debug!("📝 Initializing context files...");
     if let Err(e) = mcp_client.initialize_context(project_path.clone(), tech_stack.clone()).await {
-        eprintln!("Warning: Failed to initialize context files: {}", e);
+        debug!("Warning: Failed to initialize context files: {}", e);
     } else {
-        println!("✅ Context files created (GEMINI.md, CLAUDE.md)");
+        debug!("✅ Context files created (GEMINI.md, CLAUDE.md)");
     }
 
     // Create the project with tech stack
@@ -78,15 +79,15 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
 
     // Load agents from the agents directory
     if let Err(e) = project.load_agents_from_directory("agents").await {
-        eprintln!("Warning: Failed to load agents from directory: {}", e);
+        debug!("Warning: Failed to load agents from directory: {}", e);
     } else {
-        println!("🤖 Loaded {} agents from agents directory", project.agents.len());
+        debug!("🤖 Loaded {} agents from agents directory", project.agents.len());
     }
 
     // Set optional repository URL
     if let Some(repo_url) = repository_url {
         project.set_repository_url(repo_url);
-        println!("🔗 Repository URL: {}", repo_url);
+        debug!("🔗 Repository URL: {}", repo_url);
     }
 
     // Set optional dependency URLs
@@ -94,10 +95,10 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
         let urls: Vec<String> = deps.split(',').map(|s| s.trim().to_string()).collect();
         for url in &urls {
             if let Err(e) = project.add_dependency_url(url) {
-                eprintln!("Warning: Failed to add dependency URL '{}': {}", url, e);
+                debug!("Warning: Failed to add dependency URL '{}': {}", url, e);
             }
         }
-        println!("📦 Dependencies: {:?}", urls);
+        debug!("📦 Dependencies: {:?}", urls);
     }
 
     // Prepare agent types for idea breakdown
@@ -127,7 +128,7 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     };
 
     // Execute idea breakdown using MCP Manager
-    println!("🧠 Breaking down idea into tasks using AI...");
+    debug!("🧠 Breaking down idea into tasks using AI...");
     let context = format!("Project: {}\nTech Stack: {:?}\nPath: {}", name, tech_stack, path);
 
     match mcp_client.idea_breakdown(
@@ -138,26 +139,26 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
         McpModel::Gemini,
     ).await {
         Ok(breakdown_response) => {
-            println!("✅ Generated {} tasks from idea breakdown", breakdown_response.tasks.len());
+            debug!("✅ Generated {} tasks from idea breakdown", breakdown_response.tasks.len());
 
             // Convert TaskInput to Task and add to project
             for task_input in breakdown_response.tasks {
                 let task = Task::from_input(task_input.clone(), None);
                 if let Err(e) = project.add_task(task) {
-                    eprintln!("Warning: Failed to add task '{}': {}", task_input.title, e);
+                    debug!("Warning: Failed to add task '{}': {}", task_input.title, e);
                 } else {
-                    println!("  ✓ Added task: {}", task_input.title);
+                    debug!("  ✓ Added task: {}", task_input.title);
                 }
             }
         }
         Err(e) => {
-            eprintln!("❌ CRITICAL ERROR: Failed to generate tasks from AI: {}", e);
-            eprintln!("🔧 This application requires a working Gemini API connection.");
-            eprintln!("📋 Please ensure:");
-            eprintln!("   • GEMINI_API_KEY environment variable is set correctly");
-            eprintln!("   • Gemini CLI is installed and configured");
-            eprintln!("   • Your API key has proper permissions");
-            eprintln!("   • You have internet connectivity");
+            debug!("❌ CRITICAL ERROR: Failed to generate tasks from AI: {}", e);
+            debug!("🔧 This application requires a working Gemini API connection.");
+            debug!("📋 Please ensure:");
+            debug!("   • GEMINI_API_KEY environment variable is set correctly");
+            debug!("   • Gemini CLI is installed and configured");
+            debug!("   • Your API key has proper permissions");
+            debug!("   • You have internet connectivity");
 
             // Shutdown managers before exiting
             let _ = mcp_client.shutdown().await;
@@ -168,20 +169,20 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     }
 
     // Initialize Project Manager with MCP integration
-    println!("📋 Starting Project Manager...");
+    debug!("📋 Starting Project Manager...");
     let project_manager = ProjectManager::new(project.clone());
     let project_command_tx = project_manager.get_command_sender();
-    let mut project_event_rx = project_manager.subscribe_to_events();
+    let _project_event_rx = project_manager.subscribe_to_events();
 
     // Save project configuration
     let config_path = project_path.join("orchy.json");
     let project_json = serde_json::to_string_pretty(&project)?;
     fs::write(&config_path, project_json)?;
 
-    println!("✅ Project '{}' created successfully!", name);
-    println!("📁 Project saved to: {}", config_path.display());
-    println!("🆔 Project ID: {}", project.id);
-    println!("📊 Tasks created: {}", project.tasks.len());
+    debug!("✅ Project '{}' created successfully!", name);
+    debug!("📁 Project saved to: {}", config_path.display());
+    debug!("🆔 Project ID: {}", project.id);
+    debug!("📊 Tasks created: {}", project.tasks.len());
 
     // Shutdown managers
     let _ = mcp_client.shutdown().await;
@@ -190,10 +191,10 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     // Wait for MCP manager to shutdown
     let _ = mcp_handle.await;
 
-    println!("🎉 Project setup complete! You can now:");
-    println!("   • View tasks: orchy list-tasks");
-    println!("   • Add agents: orchy add-agent");
-    println!("   • Start development: cd {} && orchy start", path);
+    debug!("🎉 Project setup complete! You can now:");
+    debug!("   • View tasks: orchy list-tasks");
+    debug!("   • Add agents: orchy add-agent");
+    debug!("   • Start development: cd {} && orchy start", path);
 
     Ok(())
 }
@@ -203,13 +204,13 @@ pub async fn handle_list_tasks() -> Result<(), Box<dyn std::error::Error>> {
     let projects = discover_projects().await?;
     
     if projects.is_empty() {
-        println!("No projects found. Create a project first using 'orchy create'.");
+        debug!("No projects found. Create a project first using 'orchy create'.");
         return Ok(());
     }
 
-    println!("📋 Available Projects:");
+    debug!("📋 Available Projects:");
     for (i, (name, _)) in projects.iter().enumerate() {
-        println!("  {}. {}", i + 1, name);
+        debug!("  {}. {}", i + 1, name);
     }
 
     print!("\nSelect a project (1-{}): ", projects.len());
@@ -235,12 +236,12 @@ pub async fn handle_list_agents() -> Result<(), Box<dyn std::error::Error>> {
     let projects = discover_projects().await?;
     
     if projects.is_empty() {
-        println!("No projects found. Create a project first using 'orchy create'.");
+        debug!("No projects found. Create a project first using 'orchy create'.");
         return Ok(());
     }
 
-    println!("🤖 All Agents:");
-    println!("{}", "=".repeat(50));
+    debug!("🤖 All Agents:");
+    debug!("{}", "=".repeat(50));
 
     let mut all_agents: HashMap<Uuid, (&Agent, &str)> = HashMap::new();
     
@@ -252,22 +253,22 @@ pub async fn handle_list_agents() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if all_agents.is_empty() {
-        println!("No agents found in any project.");
+        debug!("No agents found in any project.");
         return Ok(());
     }
 
     for (i, (_, (agent, project_name))) in all_agents.iter().enumerate() {
-        println!("{}. {} [{}]", i + 1, agent.name, format_agent_status(&agent.status));
-        println!("   Description: {}", agent.description);
-        println!("   Project: {}", project_name);
-        println!("   File Path: {}", agent.file_path.display());
-        println!("   Created: {}", agent.created_at.format("%Y-%m-%d %H:%M:%S"));
+        debug!("{}. {} [{}]", i + 1, agent.name, format_agent_status(&agent.status));
+        debug!("   Description: {}", agent.description);
+        debug!("   Project: {}", project_name);
+        debug!("   File Path: {}", agent.file_path.display());
+        debug!("   Created: {}", agent.created_at.format("%Y-%m-%d %H:%M:%S"));
         
         if let Some(last_active) = agent.last_active_at {
-            println!("   Last Active: {}", last_active.format("%Y-%m-%d %H:%M:%S"));
+            debug!("   Last Active: {}", last_active.format("%Y-%m-%d %H:%M:%S"));
         }
         
-        println!();
+        debug!("");
     }
 
     Ok(())
@@ -278,13 +279,13 @@ pub async fn handle_list_issues() -> Result<(), Box<dyn std::error::Error>> {
     let projects = discover_projects().await?;
     
     if projects.is_empty() {
-        println!("No projects found. Create a project first using 'orchy create'.");
+        debug!("No projects found. Create a project first using 'orchy create'.");
         return Ok(());
     }
 
-    println!("📋 Available Projects:");
+    debug!("📋 Available Projects:");
     for (i, (name, _)) in projects.iter().enumerate() {
-        println!("  {}. {}", i + 1, name);
+        debug!("  {}. {}", i + 1, name);
     }
 
     print!("\nSelect a project (1-{}): ", projects.len());
@@ -315,7 +316,7 @@ pub async fn handle_add_sample_data(matches: &ArgMatches) -> Result<(), Box<dyn 
         .find(|(name, _)| name == project_name)
         .ok_or_else(|| format!("Project '{}' not found", project_name))?;
 
-    println!("Adding sample data to project '{}'...", project_name);
+    debug!("Adding sample data to project '{}'...", project_name);
 
     // Add sample agents
     let agent1 = Agent::new("Alice Developer", PathBuf::from("/tmp/alice.json"), "Senior full-stack developer");
@@ -347,10 +348,10 @@ pub async fn handle_add_sample_data(matches: &ArgMatches) -> Result<(), Box<dyn 
     // Save the updated project
     save_project(&project).await?;
 
-    println!("✅ Sample data added successfully!");
-    println!("   - 2 agents added");
-    println!("   - 3 tasks added (1 with dependencies)");
-    println!("   - 1 issue added");
+    debug!("✅ Sample data added successfully!");
+    debug!("   - 2 agents added");
+    debug!("   - 3 tasks added (1 with dependencies)");
+    debug!("   - 1 issue added");
 
     Ok(())
 }
@@ -373,7 +374,7 @@ pub async fn handle_add_agent(matches: &ArgMatches) -> Result<(), Box<dyn std::e
     // Save the updated project
     save_project(&project).await?;
 
-    println!("✅ Agent '{}' added to project '{}'!", name, project_name);
+    debug!("✅ Agent '{}' added to project '{}'!", name, project_name);
 
     Ok(())
 }

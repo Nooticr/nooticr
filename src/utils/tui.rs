@@ -178,7 +178,7 @@ pub async fn run_tui() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        println!("{err:?}");
+        tracing::debug!("{err:?}");
     }
 
     Ok(())

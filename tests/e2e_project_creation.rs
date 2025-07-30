@@ -1,4 +1,4 @@
-use orchy::managers::{McpManager, McpClient, McpModel, ProjectManager};
+use orchy::managers::{McpManager, McpClient, McpModel};
 use orchy::models::project::Project;
 use orchy::enums::TechStack;
 use orchy::utils::cli_handlers::handle_create_project;
@@ -6,6 +6,16 @@ use clap::{Arg, ArgMatches, Command};
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::fs;
+use tracing::debug;
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+
+fn init_tracing() {
+    INIT.call_once(|| {
+        tracing_subscriber::fmt::init();
+    });
+}
 
 /// Helper function to create ArgMatches for testing
 fn create_test_args(name: &str, idea: &str, path: &str, tech_stack: &str) -> ArgMatches {
@@ -31,7 +41,7 @@ async fn verify_project_structure(project_path: &PathBuf, expected_files: &[&str
     for file in expected_files {
         let file_path = project_path.join(file);
         if !file_path.exists() {
-            eprintln!("Expected file not found: {}", file_path.display());
+            debug!("Expected file not found: {}", file_path.display());
             return false;
         }
     }
@@ -42,14 +52,14 @@ async fn verify_project_structure(project_path: &PathBuf, expected_files: &[&str
 async fn verify_project_config(project_path: &PathBuf, expected_name: &str, expected_tech_stack: TechStack) -> bool {
     let config_path = project_path.join("orchy.json");
     if !config_path.exists() {
-        eprintln!("Project configuration file not found");
+        debug!("Project configuration file not found");
         return false;
     }
 
     let config_content = match fs::read_to_string(&config_path).await {
         Ok(content) => content,
         Err(e) => {
-            eprintln!("Failed to read project config: {}", e);
+            debug!("Failed to read project config: {}", e);
             return false;
         }
     };
@@ -57,18 +67,18 @@ async fn verify_project_config(project_path: &PathBuf, expected_name: &str, expe
     let project: Project = match serde_json::from_str(&config_content) {
         Ok(project) => project,
         Err(e) => {
-            eprintln!("Failed to parse project config: {}", e);
+            debug!("Failed to parse project config: {}", e);
             return false;
         }
     };
 
     if project.name != expected_name {
-        eprintln!("Project name mismatch: expected {}, got {}", expected_name, project.name);
+        debug!("Project name mismatch: expected {}, got {}", expected_name, project.name);
         return false;
     }
 
     if project.tech_stack != expected_tech_stack {
-        eprintln!("Tech stack mismatch: expected {:?}, got {:?}", expected_tech_stack, project.tech_stack);
+        debug!("Tech stack mismatch: expected {:?}, got {:?}", expected_tech_stack, project.tech_stack);
         return false;
     }
 
@@ -88,6 +98,7 @@ async fn verify_project_config(project_path: &PathBuf, expected_name: &str, expe
 
 #[tokio::test]
 async fn test_e2e_todo_app_vue_stack() {
+    init_tracing();
     println!("🧪 Testing E2E: Todo App with Vue Stack");
     
     let temp_dir = TempDir::new().unwrap();
@@ -129,6 +140,7 @@ async fn test_e2e_todo_app_vue_stack() {
 
 #[tokio::test]
 async fn test_e2e_todo_app_react_stack() {
+    init_tracing();
     println!("🧪 Testing E2E: Todo App with React Stack");
     
     let temp_dir = TempDir::new().unwrap();
@@ -169,6 +181,7 @@ async fn test_e2e_todo_app_react_stack() {
 
 #[tokio::test]
 async fn test_e2e_todo_app_rust_backend() {
+    init_tracing();
     println!("🧪 Testing E2E: Todo App with Rust Backend");
     
     let temp_dir = TempDir::new().unwrap();
@@ -209,6 +222,7 @@ async fn test_e2e_todo_app_rust_backend() {
 
 #[tokio::test]
 async fn test_e2e_todo_app_fullstack_rust_vue() {
+    init_tracing();
     println!("🧪 Testing E2E: Fullstack Todo App with Rust + Vue");
     
     let temp_dir = TempDir::new().unwrap();
@@ -249,6 +263,7 @@ async fn test_e2e_todo_app_fullstack_rust_vue() {
 
 #[tokio::test]
 async fn test_mcp_integration_direct() {
+    init_tracing();
     println!("🧪 Testing Direct MCP Integration");
     
     // Test MCP Manager directly

@@ -539,7 +539,17 @@ Maintain separation of concerns and modular architecture.
                 if !self.gemini_available {
                     return Err(OrchestratorError::internal("Gemini CLI not available"));
                 }
-                GeminiCLI::query_with_model(prompt, "gemini-1.5-flash").await
+                
+                // Use query_with_session_from_dir to enable context files access
+                let working_dir = self.project_path.as_ref()
+                    .ok_or_else(|| OrchestratorError::internal("No project path set for MCP Manager"))?;
+                
+                GeminiCLI::query_with_session_from_dir(
+                    "mcp-session", 
+                    prompt, 
+                    Some("gemini-2.5-flash"), 
+                    working_dir
+                ).await
             }
             McpModel::Claude => {
                 // Claude implementation would go here

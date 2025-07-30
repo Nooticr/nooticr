@@ -37,7 +37,7 @@ impl GeminiCLI {
 
     /// Send a query with session management
     pub async fn query_with_session(
-        session_id: &str,
+        _session_id: &str,
         prompt: &str,
         model: Option<&str>,
     ) -> Result<String> {
@@ -74,7 +74,7 @@ impl GeminiCLI {
 
     /// Send a query with session management from a specific working directory
     pub async fn query_with_session_from_dir(
-        session_id: &str,
+        _session_id: &str,
         prompt: &str,
         model: Option<&str>,
         working_dir: &std::path::Path,
@@ -84,6 +84,11 @@ impl GeminiCLI {
         // Set the working directory so Gemini can access CLAUDE.md and GEMINI.md
         command.current_dir(working_dir);
         
+        // Ensure GEMINI_API_KEY is set from environment
+        if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
+            command.env("GEMINI_API_KEY", api_key);
+        }
+        
         // Add model selection if specified
         if let Some(model) = model {
             command.args(&["--model", model]);
@@ -92,9 +97,6 @@ impl GeminiCLI {
         // Use -p/--prompt for non-interactive mode as indicated by the help message
         let output = command
             .args(&["-p", prompt])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
             .output()
             .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
@@ -115,7 +117,7 @@ impl GeminiCLI {
 
     /// Continue an existing session
     pub async fn continue_session_query(
-        session_id: &str,
+        _session_id: &str,
         prompt: &str,
         model: Option<&str>,
     ) -> Result<String> {
@@ -177,11 +179,15 @@ impl GeminiCLI {
 
     /// Send a query with specific model selection
     pub async fn query_with_model(prompt: &str, model: &str) -> Result<String> {
-        let output = Command::new("gemini")
+        let mut command = Command::new("gemini");
+        
+        // Ensure GEMINI_API_KEY is set from environment
+        if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
+            command.env("GEMINI_API_KEY", api_key);
+        }
+        
+        let output = command
             .args(&["--model", model, "-p", prompt])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
             .output()
             .await
             .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;

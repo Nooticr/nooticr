@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, RwLock, broadcast};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 /// Real-time events that can occur in the project
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +163,7 @@ pub enum ProjectCommand {
 ///
 /// // Listen for events
 /// if let Ok(event) = events.recv().await {
-///     println!("Received event: {:?}", event);
+///     debug!("Received event: {:?}", event);
 /// }
 ///
 /// manager.shutdown().await;
@@ -809,7 +810,7 @@ impl ProjectManager {
                 // Execute the actions returned by MCP
                 for action in response.actions {
                     if let Err(e) = action.execute().await {
-                        eprintln!("Failed to execute action: {}", e);
+                        debug!("Failed to execute action: {}", e);
                     }
                 }
 
@@ -818,7 +819,7 @@ impl ProjectManager {
                     let mut project_guard = project.write().await;
                     if let Some(task) = project_guard.get_task_mut(task_id) {
                         if let Err(e) = task.transition_task_status(TaskStatus::Completed) {
-                            eprintln!("Failed to update task status: {}", e);
+                            debug!("Failed to update task status: {}", e);
                         }
                     }
                 }
@@ -869,7 +870,7 @@ impl ProjectManager {
                     mcp_client.clone(),
                     event_broadcaster,
                 ).await {
-                    eprintln!("Failed to execute dependent task {}: {}", dependent_task_id, e);
+                    debug!("Failed to execute dependent task {}: {}", dependent_task_id, e);
                 }
             }
         }
@@ -975,7 +976,7 @@ mod tests {
         // Update task status
         let result = manager.update_task_status(task_id, TaskStatus::InProgress).await;
         if let Err(e) = &result {
-            println!("Error updating task status: {:?}", e);
+            debug!("Error updating task status: {:?}", e);
         }
         assert!(result.is_ok());
 
