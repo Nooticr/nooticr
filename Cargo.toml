@@ -19,6 +19,7 @@ tracing = "0.1.41"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 ratatui = "0.28"
 crossterm = "0.28"
+regex = "1.10"
 
 
 [dev-dependencies]

@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use tokio::process::Command;
 use tokio::{fs, io::AsyncWriteExt};
 use tracing::debug;
+use std::os::unix::fs::PermissionsExt;
+use regex::Regex;
+use std::pin::Pin;
+use std::future::Future;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Action {
@@ -36,6 +40,68 @@ pub enum Action {
     RunCommand {
         command: String,
         env: Option<Vec<(String, String)>>,
+    },
+    /// Search for text patterns in files using grep-like functionality
+    Grep {
+        pattern: String,
+        path: String,
+        recursive: bool,
+        case_sensitive: bool,
+    },
+    /// Create a directory (and parent directories if needed)
+    CreateDirectory {
+        path: String,
+    },
+    /// Remove a directory (and all contents if recursive)
+    RemoveDirectory {
+        path: String,
+        recursive: bool,
+    },
+    /// List directory contents
+    ListDirectory {
+        path: String,
+        recursive: bool,
+    },
+    /// Create a symbolic link
+    CreateSymlink {
+        target: String,
+        link_path: String,
+    },
+    /// Set file permissions (Unix-style)
+    SetPermissions {
+        path: String,
+        permissions: String, // e.g., "755", "644"
+    },
+    /// Append content to a file (instead of overwriting)
+    Append {
+        path: String,
+        content: String,
+    },
+    /// Create a backup of a file
+    Backup {
+        path: String,
+        backup_suffix: Option<String>, // e.g., ".bak", ".backup"
+    },
+    /// Download a file from a URL
+    Download {
+        url: String,
+        destination: String,
+    },
+    /// Extract/decompress an archive (zip, tar, etc.)
+    Extract {
+        archive_path: String,
+        destination: String,
+    },
+    /// Create an archive from files/directories
+    Archive {
+        source_paths: Vec<String>,
+        archive_path: String,
+        format: String, // "zip", "tar", "tar.gz"
+    },
+    /// Watch a file or directory for changes
+    Watch {
+        path: String,
+        duration_seconds: u64,
     },
 }
 
@@ -206,8 +272,288 @@ impl Action {
                     .await?;
                 debug!("Ran command `{}` with status {}", command, output.status);
             }
+
+            Action::Grep { pattern, path, recursive, case_sensitive } => {
+                let regex = if *case_sensitive {
+                    Regex::new(pattern).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
+                } else {
+                    Regex::new(&format!("(?i){}", pattern)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
+                };
+
+                if *recursive {
+                    Self::grep_recursive(&regex, path).await?;
+                } else {
+                    Self::grep_file(&regex, path).await?;
+                }
+            }
+
+            Action::CreateDirectory { path } => {
+                let dir_path = PathBuf::from(path);
+                fs::create_dir_all(&dir_path).await?;
+                debug!("Created directory {}", path);
+            }
+
+            Action::RemoveDirectory { path, recursive } => {
+                let dir_path = PathBuf::from(path);
+                if *recursive {
+                    fs::remove_dir_all(&dir_path).await?;
+                } else {
+                    fs::remove_dir(&dir_path).await?;
+                }
+                debug!("Removed directory {}", path);
+            }
+
+            Action::ListDirectory { path, recursive } => {
+                if *recursive {
+                    Self::list_directory_recursive(path).await?;
+                } else {
+                    Self::list_directory(path).await?;
+                }
+            }
+
+            Action::CreateSymlink { target, link_path } => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs;
+                    fs::symlink(target, link_path)?;
+                    debug!("Created symlink {} -> {}", link_path, target);
+                }
+                #[cfg(not(unix))]
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "Symlinks not supported on this platform"
+                    ));
+                }
+            }
+
+            Action::SetPermissions { path, permissions } => {
+                #[cfg(unix)]
+                {
+                    let file_path = PathBuf::from(path);
+                    let mode = u32::from_str_radix(permissions, 8)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+                    let metadata = fs::metadata(&file_path).await?;
+                    let mut perms = metadata.permissions();
+                    perms.set_mode(mode);
+                    fs::set_permissions(&file_path, perms).await?;
+                    debug!("Set permissions {} on {}", permissions, path);
+                }
+                #[cfg(not(unix))]
+                {
+                    debug!("Permission setting not supported on this platform");
+                }
+            }
+
+            Action::Append { path, content } => {
+                let file_path = PathBuf::from(path);
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&file_path)
+                    .await?;
+                file.write_all(content.as_bytes()).await?;
+                file.flush().await?;
+                debug!("Appended to {}", path);
+            }
+
+            Action::Backup { path, backup_suffix } => {
+                let file_path = PathBuf::from(path);
+                let suffix = backup_suffix.as_deref().unwrap_or(".bak");
+                let backup_path = format!("{}{}", path, suffix);
+                let content = fs::read(&file_path).await?;
+                fs::write(&backup_path, content).await?;
+                debug!("Created backup {} -> {}", path, backup_path);
+            }
+
+            Action::Download { url, destination } => {
+                // For now, use curl command - in a real implementation you might use reqwest
+                let output = Command::new("curl")
+                    .arg("-L")
+                    .arg("-o")
+                    .arg(destination)
+                    .arg(url)
+                    .output()
+                    .await?;
+
+                if !output.status.success() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Download failed: {}", String::from_utf8_lossy(&output.stderr))
+                    ));
+                }
+                debug!("Downloaded {} to {}", url, destination);
+            }
+
+            Action::Extract { archive_path, destination } => {
+                let archive_path_buf = PathBuf::from(archive_path);
+                let extension = archive_path_buf.extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("");
+
+                let command = match extension {
+                    "zip" => format!("unzip -q '{}' -d '{}'", archive_path, destination),
+                    "tar" => format!("tar -xf '{}' -C '{}'", archive_path, destination),
+                    "gz" if archive_path.ends_with(".tar.gz") => {
+                        format!("tar -xzf '{}' -C '{}'", archive_path, destination)
+                    },
+                    _ => return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("Unsupported archive format: {}", extension)
+                    )),
+                };
+
+                // Create destination directory if it doesn't exist
+                fs::create_dir_all(destination).await?;
+
+                let output = Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .output()
+                    .await?;
+
+                if !output.status.success() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Extract failed: {}", String::from_utf8_lossy(&output.stderr))
+                    ));
+                }
+                debug!("Extracted {} to {}", archive_path, destination);
+            }
+
+            Action::Archive { source_paths, archive_path, format } => {
+                let sources = source_paths.join(" ");
+                let command = match format.as_str() {
+                    "zip" => format!("zip -r '{}' {}", archive_path, sources),
+                    "tar" => format!("tar -cf '{}' {}", archive_path, sources),
+                    "tar.gz" => format!("tar -czf '{}' {}", archive_path, sources),
+                    _ => return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("Unsupported archive format: {}", format)
+                    )),
+                };
+
+                let output = Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .output()
+                    .await?;
+
+                if !output.status.success() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Archive creation failed: {}", String::from_utf8_lossy(&output.stderr))
+                    ));
+                }
+                debug!("Created archive {} from {:?}", archive_path, source_paths);
+            }
+
+            Action::Watch { path, duration_seconds } => {
+                debug!("Watching {} for {} seconds", path, duration_seconds);
+                // Simple implementation - in practice you'd use a proper file watcher
+                let start_time = std::time::Instant::now();
+                let duration = std::time::Duration::from_secs(*duration_seconds);
+
+                let file_path = PathBuf::from(path);
+                let initial_metadata = fs::metadata(&file_path).await.ok();
+
+                while start_time.elapsed() < duration {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                    if let Ok(current_metadata) = fs::metadata(&file_path).await {
+                        if let Some(ref initial) = initial_metadata {
+                            if current_metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                                != initial.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH) {
+                                debug!("File {} was modified", path);
+                            }
+                        }
+                    }
+                }
+                debug!("Finished watching {}", path);
+            }
         }
         Ok(())
+    }
+
+    // Helper methods for new actions
+    async fn grep_file(regex: &Regex, path: &str) -> Result<(), std::io::Error> {
+        let content = fs::read_to_string(path).await?;
+        for (line_num, line) in content.lines().enumerate() {
+            if regex.is_match(line) {
+                debug!("{}:{}: {}", path, line_num + 1, line);
+            }
+        }
+        Ok(())
+    }
+
+    fn grep_recursive<'a>(regex: &'a Regex, path: &'a str) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let path_buf = PathBuf::from(path);
+            if path_buf.is_file() {
+                Self::grep_file(regex, path).await?;
+            } else if path_buf.is_dir() {
+                let mut entries = fs::read_dir(&path_buf).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let entry_path = entry.path();
+                    if entry_path.is_file() {
+                        if let Some(path_str) = entry_path.to_str() {
+                            Self::grep_file(regex, path_str).await?;
+                        }
+                    } else if entry_path.is_dir() {
+                        if let Some(path_str) = entry_path.to_str() {
+                            Self::grep_recursive(regex, path_str).await?;
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    async fn list_directory(path: &str) -> Result<(), std::io::Error> {
+        let mut entries = fs::read_dir(path).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let entry_path = entry.path();
+            let file_name = entry_path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("?");
+
+            let metadata = entry.metadata().await?;
+            let file_type = if metadata.is_dir() { "d" } else { "f" };
+            let size = metadata.len();
+
+            debug!("{} {} {} bytes", file_type, file_name, size);
+        }
+        Ok(())
+    }
+
+    async fn list_directory_recursive(path: &str) -> Result<(), std::io::Error> {
+        Self::list_directory_recursive_impl(path, 0).await
+    }
+
+    fn list_directory_recursive_impl<'a>(path: &'a str, depth: usize) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let indent = "  ".repeat(depth);
+            let mut entries = fs::read_dir(path).await?;
+
+            while let Some(entry) = entries.next_entry().await? {
+                let entry_path = entry.path();
+                let file_name = entry_path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("?");
+
+                let metadata = entry.metadata().await?;
+                if metadata.is_dir() {
+                    debug!("{}d {}/", indent, file_name);
+                    if let Some(path_str) = entry_path.to_str() {
+                        Self::list_directory_recursive_impl(path_str, depth + 1).await?;
+                    }
+                } else {
+                    debug!("{}f {} ({} bytes)", indent, file_name, metadata.len());
+                }
+            }
+            Ok(())
+        })
     }
 }
 

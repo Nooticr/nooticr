@@ -1,9 +1,10 @@
 pub mod agent;
 pub mod agent_status_change;
+pub mod code_review;
 pub mod comment;
+pub mod conflict_resolution;
 pub mod issue;
 pub mod issue_status_change;
 pub mod project;
 pub mod pull_request;
 pub mod task;
-pub mod code_review;

@@ -664,6 +664,7 @@ mod tests {
             description: "Create database schema and tables".to_string(),
             priority: "High".to_string(),
             complexity: 7,
+            agent_type: Some("BackendEngineerRust".to_string()),
             tags: vec!["backend".to_string(), "database".to_string()],
             depends_on: vec![],
         };
@@ -847,6 +848,7 @@ mod tests {
             description: "A task with dependencies".to_string(),
             priority: "Medium".to_string(),
             complexity: 4,
+            agent_type: Some("DevOps".to_string()),
             tags: vec!["test".to_string()],
             depends_on: vec!["dependency-task".to_string()],
         };

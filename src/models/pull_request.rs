@@ -156,14 +156,68 @@ impl PullRequest {
         &mut self,
         reviewer: impl Into<String>,
         approved: bool,
-        comments: Vec<String>,
+        overall_comment: impl Into<String>,
+        comments: Vec<crate::models::code_review::ReviewComment>,
+        summary: crate::models::code_review::ReviewSummary,
+        files_reviewed: Vec<String>,
     ) -> Uuid {
-        let review = CodeReview::new(self.id.to_string(), reviewer, approved, comments);
+        let review = CodeReview::new(
+            self.id.to_string(),
+            reviewer,
+            approved,
+            overall_comment,
+            comments,
+            summary,
+            files_reviewed,
+        );
         let review_id = review.id;
         self.code_reviews.push(review);
         self.updated_at = Utc::now();
         self.remotly_synced = false; // Mark as unsynced when reviews are added
         review_id
+    }
+
+    /// Add a simple code review (for backward compatibility)
+    pub fn add_simple_code_review(
+        &mut self,
+        reviewer: impl Into<String>,
+        approved: bool,
+        comments: Vec<String>,
+    ) -> Uuid {
+        // Convert simple comments to ReviewComment objects
+        let review_comments: Vec<crate::models::code_review::ReviewComment> = comments
+            .into_iter()
+            .map(|comment| crate::models::code_review::ReviewComment::new(
+                "general",
+                None,
+                None,
+                crate::models::code_review::ReviewFeedbackType::Suggestion,
+                crate::models::code_review::ReviewSeverity::Info,
+                comment,
+                None,
+                None,
+            ))
+            .collect();
+
+        let summary = crate::models::code_review::ReviewSummary {
+            total_files_reviewed: 1,
+            total_lines_reviewed: 0,
+            issues_found: 0,
+            suggestions_made: review_comments.len() as u32,
+            security_concerns: 0,
+            performance_concerns: 0,
+            test_coverage_adequate: true,
+            overall_quality_score: if approved { 80 } else { 60 },
+        };
+
+        self.add_code_review(
+            reviewer,
+            approved,
+            "General review",
+            review_comments,
+            summary,
+            vec!["general".to_string()],
+        )
     }
 
     /// Get all code reviews
@@ -587,7 +641,7 @@ mod tests {
         assert_eq!(pr.get_approved_reviews_count(), 0);
 
         // Add approved review
-        let review1_id = pr.add_code_review("reviewer1", true, vec!["Looks good!".to_string()]);
+        let review1_id = pr.add_simple_code_review("reviewer1", true, vec!["Looks good!".to_string()]);
         assert_eq!(pr.get_code_reviews().len(), 1);
         assert!(pr.has_approved_reviews());
         assert!(!pr.has_rejected_reviews());
@@ -596,7 +650,7 @@ mod tests {
 
         // Add rejected review
         pr.mark_synced();
-        let review2_id = pr.add_code_review("reviewer2", false, vec!["Needs changes".to_string(), "Fix the bug".to_string()]);
+        let review2_id = pr.add_simple_code_review("reviewer2", false, vec!["Needs changes".to_string(), "Fix the bug".to_string()]);
         assert_eq!(pr.get_code_reviews().len(), 2);
         assert!(pr.has_approved_reviews());
         assert!(pr.has_rejected_reviews());

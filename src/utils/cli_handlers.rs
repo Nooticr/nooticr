@@ -2,7 +2,7 @@ use crate::models::project::Project;
 use crate::models::agent::Agent;
 use crate::models::task::Task;
 use crate::models::issue::Issue;
-use crate::enums::{Priority, TechStack, Action};
+use crate::enums::{Priority, TechStack};
 use crate::utils::cli::*;
 use clap::ArgMatches;
 use std::collections::HashMap;
