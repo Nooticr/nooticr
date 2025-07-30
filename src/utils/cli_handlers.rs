@@ -2,7 +2,7 @@ use crate::models::project::Project;
 use crate::models::agent::Agent;
 use crate::models::task::Task;
 use crate::models::issue::Issue;
-use crate::enums::{Priority, TechStack};
+use crate::enums::{Priority, TechStack, Action};
 use crate::utils::cli::*;
 use clap::ArgMatches;
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     };
 
     // Create the project with tech stack
-    let mut project = Project::new_with_tech_stack(name, idea, path, tech_stack);
+    let mut project = Project::new_with_tech_stack(name, idea, path, tech_stack.clone());
     println!("Tech Stack: {:?}", project.tech_stack);
 
     // Load agents from the agents directory
@@ -77,6 +77,29 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
         fs::create_dir_all(&project_path)?;
         println!("Created project directory: {}", path);
     }
+
+
+    // read the right context depending on tech stack
+    // let context = match tech_stack {
+    //     TechStack::Rust => "context.rust.asyncgraphql.md",
+    //     TechStack::Vue => "context.vue.md",
+    //     TechStack::React => "context.react.md",
+    //     TechStack::FullstackRustVue => "context.rust.asyncgraphql.md",
+    //     TechStack::FullstackRustReact => "context.rust.asyncgraphql.md",
+    // };
+
+    // let full_contect_path = PathBuf::from("contexts").join(context);
+    // let content = fs::read_to_string(full_contect_path)?;
+
+    // // create the action
+    // let action = Action::Write {
+    //     path: project_path.join("GEMINI.md").to_str().unwrap().to_string(),
+    //     content,
+    // };
+
+    // // execute the action
+    // action.execute().await?;
+
 
     // Save project configuration
     let config_path = project_path.join("orchy.json");

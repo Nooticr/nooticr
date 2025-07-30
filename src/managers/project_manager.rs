@@ -654,7 +654,7 @@ impl ProjectManager {
         });
 
         let mut completed = 0;
-        let mut errors = 0;
+        let errors = 0;
 
         // Sync pull requests (simulated - actual implementation would sync with remote)
         for _ in 0..unsynced_pull_requests {
