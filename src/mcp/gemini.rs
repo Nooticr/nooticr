@@ -87,7 +87,12 @@ impl GeminiCLI {
         // Ensure GEMINI_API_KEY is set from environment
         if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
             command.env("GEMINI_API_KEY", api_key);
+        } else {
+            tracing::warn!("⚠️  GEMINI_API_KEY not found in environment");
         }
+        
+        tracing::debug!("🤖 Calling Gemini CLI from directory: {:?}", working_dir);
+        tracing::debug!("📝 Prompt length: {} characters", prompt.len());
         
         // Add model selection if specified
         if let Some(model) = model {

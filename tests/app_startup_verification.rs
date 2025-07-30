@@ -16,6 +16,8 @@ static INIT: Once = Once::new();
 
 fn init_tracing() {
     INIT.call_once(|| {
+        // Load environment variables from .env file
+        dotenv::dotenv().ok();
         tracing_subscriber::fmt::init();
     });
 }
