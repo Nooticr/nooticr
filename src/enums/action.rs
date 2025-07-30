@@ -191,26 +191,54 @@ impl Action {
     /// # }
     /// ```
     pub async fn execute_batch(actions: &[Action]) -> Result<(), std::io::Error> {
-        for action in actions {
-            action.execute().await?;
+        use tracing::debug;
+        debug!("🚀 Starting batch execution of {} actions", actions.len());
+        
+        for (index, action) in actions.iter().enumerate() {
+            debug!("⚡ Executing action {}/{}: {:?}", index + 1, actions.len(), action);
+            match action.execute().await {
+                Ok(_) => {
+                    debug!("✅ Action {}/{} completed successfully", index + 1, actions.len());
+                }
+                Err(e) => {
+                    debug!("❌ Action {}/{} failed: {}", index + 1, actions.len(), e);
+                    return Err(e);
+                }
+            }
         }
+        debug!("🎉 Batch execution completed successfully");
         Ok(())
     }
 
     pub async fn execute(&self) -> Result<(), std::io::Error> {
         match self {
             Action::Write { path, content } => {
+                use tracing::debug;
+                debug!("📝 Write action: Creating file '{}'", path);
                 let file_path = PathBuf::from(path);
 
                 // Create parent directories if they don't exist
                 if let Some(parent) = file_path.parent() {
+                    debug!("📁 Creating parent directories: {:?}", parent);
                     fs::create_dir_all(parent).await?;
+                    debug!("✅ Parent directories created");
                 }
 
+                debug!("🔨 Creating file: {:?}", file_path);
                 let mut file = fs::File::create(&file_path).await?;
+                
+                debug!("✍️  Writing {} bytes to file", content.len());
                 file.write_all(content.as_bytes()).await?;
                 file.flush().await?;
-                debug!("Wrote to {}: {}", path, content);
+                
+                debug!("✅ Successfully wrote file '{}' ({} bytes)", path, content.len());
+                
+                // Verify file was created
+                if file_path.exists() {
+                    debug!("🔍 File verification: '{}' exists", path);
+                } else {
+                    debug!("⚠️  File verification: '{}' does not exist after write!", path);
+                }
             }
 
             Action::Read { path } => {

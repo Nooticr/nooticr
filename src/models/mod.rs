@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_error_recovery;
 pub mod agent_status_change;
 pub mod code_review;
 pub mod comment;

@@ -4,14 +4,16 @@ use crate::models::task::Task;
 use crate::models::issue::Issue;
 use crate::enums::{Priority, TechStack};
 use crate::utils::cli::*;
+use crate::utils::dependency_resolver::DependencyResolver;
 use crate::managers::{McpManager, McpClient, McpModel, ProjectManager, ProjectCommand};
 use clap::ArgMatches;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use uuid::Uuid;
 use tracing::debug;
+use tokio::sync::mpsc;
 
 /// Parse tech stack from string
 fn parse_tech_stack(tech_stack_str: &str) -> Result<TechStack, Box<dyn std::error::Error>> {
@@ -23,6 +25,263 @@ fn parse_tech_stack(tech_stack_str: &str) -> Result<TechStack, Box<dyn std::erro
         "fullstack-rust-react" | "rust-react" => Ok(TechStack::FullstackRustReact),
         _ => Err(format!("Invalid tech stack: {}. Valid options: rust, vue, react, fullstack-rust-vue, fullstack-rust-react", tech_stack_str).into()),
     }
+}
+
+/// Collect existing files in the project directory for context
+async fn collect_existing_files(project_path: &PathBuf) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+    debug!("📂 Collecting existing files from: {:?}", project_path);
+    let mut files = Vec::new();
+    
+    // Define file extensions we want to include for context
+    let relevant_extensions = vec![
+        "rs", "js", "ts", "jsx", "tsx", "vue", "py", "go", "java", "cpp", "c", "h",
+        "json", "toml", "yaml", "yml", "md", "txt", "html", "css", "scss", "less",
+        "php", "rb", "swift", "kt", "cs", "scala", "sh", "dockerfile", "xml"
+    ];
+    
+    fn collect_files_recursive(
+        dir: &PathBuf, 
+        files: &mut Vec<(String, String)>, 
+        relevant_extensions: &[&str],
+        base_path: &PathBuf
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                
+                // Skip hidden files and directories
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                }
+                
+                // Skip common directories that usually don't contain source code
+                if path.is_dir() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if matches!(name, "node_modules" | "target" | "build" | "dist" | "__pycache__" | ".git") {
+                            continue;
+                        }
+                    }
+                    collect_files_recursive(&path, files, relevant_extensions, base_path)?;
+                } else if path.is_file() {
+                    // Check if file has a relevant extension
+                    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+                        if relevant_extensions.contains(&extension) {
+                            // Get relative path from project root
+                            let relative_path = path.strip_prefix(base_path)
+                                .unwrap_or(&path)
+                                .to_string_lossy()
+                                .to_string();
+                            
+                            // Read file content (limit size to avoid overwhelming the AI)
+                            match std::fs::read_to_string(&path) {
+                                Ok(content) => {
+                                    let truncated_content = if content.len() > 2000 {
+                                        format!("{}...\n[Content truncated - {} total characters]", 
+                                               &content[..2000], content.len())
+                                    } else {
+                                        content
+                                    };
+                                    files.push((relative_path, truncated_content));
+                                },
+                                Err(e) => {
+                                    debug!("⚠️  Could not read file {:?}: {}", path, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    collect_files_recursive(project_path, &mut files, &relevant_extensions, project_path)?;
+    
+    debug!("📋 Collected {} files for context:", files.len());
+    for (path, content) in &files {
+        debug!("   📄 {} ({} characters)", path, content.len());
+    }
+    
+    Ok(files)
+}
+
+/// Execute tasks in dependency order using Project Manager
+async fn execute_tasks_in_dependency_order(
+    tasks: Vec<Task>,
+    project_path: &PathBuf,
+    _tech_stack: &TechStack,
+    mcp_client: &McpClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    debug!("🎯 Starting task-by-task development process via Project Manager");
+    debug!("📊 Total tasks to execute: {}", tasks.len());
+    
+    // Load the existing project to get full context including agents
+    debug!("📂 Loading existing project from orchy.json...");
+    let config_path = project_path.join("orchy.json");
+    let mut project = if config_path.exists() {
+        match fs::read_to_string(&config_path) {
+            Ok(project_json) => {
+                match serde_json::from_str::<Project>(&project_json) {
+                    Ok(p) => {
+                        debug!("✅ Successfully loaded project with {} tasks and {} agents", 
+                               p.tasks.len(), p.agents.len());
+                        p
+                    }
+                    Err(e) => {
+                        debug!("❌ Failed to parse orchy.json: {}", e);
+                        return Err(format!("Failed to parse project configuration: {}", e).into());
+                    }
+                }
+            }
+            Err(e) => {
+                debug!("❌ Failed to read orchy.json: {}", e);
+                return Err(format!("Failed to read project configuration: {}", e).into());
+            }
+        }
+    } else {
+        debug!("❌ orchy.json not found in project directory!");
+        return Err("Project configuration file (orchy.json) not found".into());
+    };
+    
+    // Update the project's tasks with the current task list (in case there were changes)
+    project.tasks = tasks;
+    
+    // Create Project Manager for proper task and agent management
+    debug!("🏗️  Creating Project Manager for task execution...");
+    let project_manager = ProjectManager::new(project.clone());
+    let command_tx = project_manager.get_command_sender();
+    let _event_rx = project_manager.subscribe_to_events();
+    
+    // Project Manager automatically starts its background task in new()
+    
+    // Validate dependencies first
+    debug!("🔍 Validating task dependencies...");
+    DependencyResolver::validate_dependencies(&project.tasks)?;
+    debug!("✅ All task dependencies are valid");
+    
+    // Sort tasks by dependencies
+    debug!("📋 Sorting tasks by dependency order...");
+    let sorted_tasks = DependencyResolver::sort_tasks_by_dependencies(project.tasks.clone())?;
+    debug!("✅ Tasks sorted successfully");
+    
+    // Track completed tasks
+    let mut completed_tasks: HashSet<Uuid> = HashSet::new();
+    let mut task_name_mapping: HashMap<Uuid, String> = HashMap::new();
+    
+    // Build task name mapping for dependency tracking
+    for task in &sorted_tasks {
+        task_name_mapping.insert(task.id, task.title.clone());
+    }
+    
+    debug!("🚀 Beginning task execution in dependency order via Project Manager...");
+    
+    // Execute tasks one by one using Project Manager's ExecuteTaskWithMcp command
+    for (task_index, task) in sorted_tasks.iter().enumerate() {
+        debug!("");
+        debug!("{}", "=".repeat(80));
+        debug!("🎯 EXECUTING TASK {}/{}: {}", task_index + 1, sorted_tasks.len(), task.title);
+        debug!("{}", "=".repeat(80));
+        debug!("📋 Task Details:");
+        debug!("   🆔 ID: {}", task.id);
+        debug!("   📝 Description: {}", task.description);
+        debug!("   🎚️  Priority: {:?}", task.priority);
+        debug!("   📊 Complexity: {:?}/10", task.estimated_complexity);
+        debug!("   🏷️  Tags: {:?}", task.tags);
+        debug!("   📦 Dependencies: {}", task.depends_on.len());
+        
+        // Log dependency information
+        if !task.depends_on.is_empty() {
+            debug!("   ⬅️  Depends on:");
+            for (dep_index, dep_id) in task.depends_on.iter().enumerate() {
+                if let Some(dep_name) = task_name_mapping.get(dep_id) {
+                    let status = if completed_tasks.contains(dep_id) { "✅ COMPLETED" } else { "❌ PENDING" };
+                    debug!("      {}. {} ({})", dep_index + 1, dep_name, status);
+                } else {
+                    debug!("      {}. Unknown task: {} (❌ NOT FOUND)", dep_index + 1, dep_id);
+                }
+            }
+        } else {
+            debug!("   🟢 No dependencies - can execute immediately");
+        }
+        
+        // Verify all dependencies are completed
+        debug!("🔍 Verifying dependencies are satisfied...");
+        if !DependencyResolver::are_dependencies_satisfied(task, &completed_tasks) {
+            let error_msg = format!("Task '{}' has unsatisfied dependencies", task.title);
+            debug!("❌ {}", error_msg);
+            return Err(error_msg.into());
+        }
+        debug!("✅ All dependencies satisfied, proceeding with task execution");
+        
+        // Execute task using Project Manager's ExecuteTaskWithMcp command
+        debug!("🤖 Executing task via Project Manager...");
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        
+        if let Err(e) = command_tx.send(ProjectCommand::ExecuteTaskWithMcp {
+            task_id: task.id,
+            mcp_client: mcp_client.clone(),
+            respond_to: response_tx,
+        }) {
+            debug!("❌ Failed to send ExecuteTaskWithMcp command: {}", e);
+            return Err(format!("Failed to send task execution command: {}", e).into());
+        }
+        
+        // Wait for task execution result
+        match response_rx.recv().await {
+            Some(Ok(_)) => {
+                debug!("✅ Task '{}' executed successfully via Project Manager!", task.title);
+                completed_tasks.insert(task.id);
+                debug!("✅ Task '{}' marked as COMPLETED ({}/{} tasks done)", 
+                       task.title, completed_tasks.len(), sorted_tasks.len());
+            }
+            Some(Err(e)) => {
+                debug!("❌ Task '{}' execution failed via Project Manager: {}", task.title, e);
+                return Err(format!("Task '{}' execution failed: {}", task.title, e).into());
+            }
+            None => {
+                debug!("❌ Project Manager disconnected during task execution");
+                return Err("Project Manager disconnected during task execution".into());
+            }
+        }
+        
+        debug!("🎉 Task '{}' completed successfully!", task.title);
+        debug!("📊 Progress: {}/{} tasks completed", completed_tasks.len(), sorted_tasks.len());
+    }
+    
+    debug!("");
+    debug!("🎉 ALL TASKS COMPLETED SUCCESSFULLY!");
+    debug!("📊 Final statistics:");
+    debug!("   ✅ Total tasks executed: {}", sorted_tasks.len());
+    debug!("   ✅ All dependencies satisfied");
+    debug!("   ✅ All actions executed successfully");
+    
+    // Get final project state from Project Manager and save it
+    debug!("📊 Getting final project state from Project Manager...");
+    let (project_tx, mut project_rx) = mpsc::unbounded_channel();
+    
+    if let Err(e) = command_tx.send(ProjectCommand::GetProject {
+        respond_to: project_tx,
+    }) {
+        debug!("⚠️  Failed to get final project state: {}", e);
+    } else {
+        if let Some(final_project) = project_rx.recv().await {
+            debug!("💾 Saving final project state with updated task and agent histories...");
+            match save_project(&final_project).await {
+                Ok(_) => debug!("✅ Final project state saved successfully"),
+                Err(e) => debug!("⚠️  Failed to save final project state: {}", e),
+            }
+        }
+    }
+    
+    // Shutdown Project Manager
+    debug!("🔧 Shutting down Project Manager...");
+    let _ = command_tx.send(ProjectCommand::Shutdown);
+    
+    debug!("🏁 Task-by-task development process complete!");
+    
+    Ok(())
 }
 
 /// Handle the create project command with full MCP and Project Manager integration
@@ -141,13 +400,70 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
         Ok(breakdown_response) => {
             debug!("✅ Generated {} tasks from idea breakdown", breakdown_response.tasks.len());
 
+            // Collect acceptance criteria first before consuming tasks (for legacy compatibility)
+            let _acceptance_criteria = breakdown_response.tasks.iter()
+                .map(|task| task.title.clone())
+                .collect::<Vec<_>>();
+
             // Convert TaskInput to Task and add to project
-            for task_input in breakdown_response.tasks {
+            debug!("🔄 Converting {} TaskInputs to Tasks and adding to project", breakdown_response.tasks.len());
+            for (index, task_input) in breakdown_response.tasks.iter().enumerate() {
+                debug!("📝 Processing task {}/{}: '{}'", index + 1, breakdown_response.tasks.len(), task_input.title);
+                debug!("   - Description: {}", task_input.description);
+                debug!("   - Priority: {:?}", task_input.priority);
+                debug!("   - Agent type: {:?}", task_input.agent_type);
+                
                 let task = Task::from_input(task_input.clone(), None);
-                if let Err(e) = project.add_task(task) {
-                    debug!("Warning: Failed to add task '{}': {}", task_input.title, e);
+                debug!("   - Generated Task ID: {}", task.id);
+                
+                if let Err(e) = project.add_task(task.clone()) {
+                    debug!("❌ Failed to add task '{}': {}", task_input.title, e);
                 } else {
-                    debug!("  ✓ Added task: {}", task_input.title);
+                    debug!("✅ Successfully added task '{}' to project", task_input.title);
+                }
+            }
+            
+            debug!("📊 Project now has {} tasks total", project.tasks.len());
+
+            // Execute tasks in dependency order using the new task-by-task approach
+            debug!("🎯 Starting task-by-task development process...");
+            debug!("📋 Converting {} tasks for dependency-ordered execution", project.tasks.len());
+            
+            // Convert project tasks to owned tasks for processing
+            let tasks_for_execution: Vec<Task> = project.tasks.clone();
+            
+            match execute_tasks_in_dependency_order(
+                tasks_for_execution,
+                &project_path,
+                &tech_stack,
+                &mcp_client,
+            ).await {
+                Ok(_) => {
+                    debug!("🎉 All tasks completed successfully!");
+                    debug!("📁 Project should now be fully developed in: {:?}", project_path);
+                    
+                    // Final verification of project structure
+                    debug!("🔍 Final project verification:");
+                    match std::fs::read_dir(&project_path) {
+                        Ok(entries) => {
+                            debug!("📋 Final project structure:");
+                            for entry in entries.flatten() {
+                                let path = entry.path();
+                                if path.is_dir() {
+                                    debug!("   📁 {}/", entry.file_name().to_string_lossy());
+                                } else {
+                                    debug!("   📄 {}", entry.file_name().to_string_lossy());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            debug!("❌ Failed to list final project directory: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("❌ Task-by-task development failed: {}", e);
+                    debug!("⚠️  Some tasks may have been completed, but the process was interrupted");
                 }
             }
         }
@@ -176,8 +492,21 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
 
     // Save project configuration
     let config_path = project_path.join("orchy.json");
+    debug!("💾 Saving project configuration to: {}", config_path.display());
+    
     let project_json = serde_json::to_string_pretty(&project)?;
-    fs::write(&config_path, project_json)?;
+    debug!("📄 Project JSON size: {} bytes", project_json.len());
+    
+    fs::write(&config_path, &project_json)?;
+    debug!("✅ Project configuration saved successfully");
+    
+    // Verify file was saved
+    if config_path.exists() {
+        let file_size = std::fs::metadata(&config_path)?.len();
+        debug!("🔍 Verification: orchy.json exists ({} bytes)", file_size);
+    } else {
+        debug!("⚠️  Verification: orchy.json does not exist after save!");
+    }
 
     debug!("✅ Project '{}' created successfully!", name);
     debug!("📁 Project saved to: {}", config_path.display());

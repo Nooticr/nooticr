@@ -121,7 +121,7 @@ impl Prompts {
             .join("\n");
 
         format!(
-            r#"Implement this feature with comprehensive development approach:
+            r#"Implement this specific task with comprehensive development approach:
 
             FEATURE TASK: {}
 
@@ -281,6 +281,369 @@ impl Prompts {
             - Make the code maintainable and extensible
             "#,
             task_description, requirements, criteria_section, codebase_context, files_section, tech_stack
+        )
+    }
+
+    /// Enhanced prompt for individual task development with dependency awareness
+    pub fn task_development_user_prompt(
+        task_title: &str,
+        task_description: &str,
+        task_complexity: u8,
+        task_priority: &str,
+        task_tags: &[String],
+        tech_stack: &str,
+        existing_files: &[(String, String)], // (file_path, content) pairs for context
+        completed_dependencies: &[String], // Names of completed dependency tasks
+        acceptance_criteria: &[String],
+        codebase_context: &str,
+    ) -> String {
+        let files_section = if existing_files.is_empty() {
+            "No existing files in the project yet.".to_string()
+        } else {
+            existing_files
+                .iter()
+                .map(|(file_path, content)| {
+                    let preview = if content.len() > 500 {
+                        format!("{}...\n[Content truncated - {} total characters]", 
+                               &content[..500], content.len())
+                    } else {
+                        content.clone()
+                    };
+                    format!("FILE: {}\n```\n{}\n```", file_path, preview)
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
+
+        let criteria_section = if acceptance_criteria.is_empty() {
+            "No specific acceptance criteria provided.".to_string()
+        } else {
+            acceptance_criteria
+                .iter()
+                .enumerate()
+                .map(|(i, criteria)| format!("{}. {}", i + 1, criteria))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let dependencies_section = if completed_dependencies.is_empty() {
+            "No dependencies - this is a foundational task.".to_string()
+        } else {
+            format!("This task builds upon the following completed tasks:\n{}",
+                    completed_dependencies
+                        .iter()
+                        .enumerate()
+                        .map(|(i, dep)| format!("{}. {}", i + 1, dep))
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+        };
+
+        let tags_section = task_tags.join(", ");
+
+        format!(
+            r#"Implement this specific development task with precise, production-ready code:
+
+            TASK DETAILS:
+            Title: {}
+            Description: {}
+            Priority: {} (Critical/High/Medium/Low)
+            Complexity: {}/10
+            Categories: {}
+            Technology Stack: {}
+
+            DEPENDENCY CONTEXT:
+            {}
+
+            ACCEPTANCE CRITERIA:
+            {}
+
+            EXISTING CODEBASE:
+            {}
+
+            EXISTING FILES FOR CONTEXT:
+            {}
+
+            SPECIFIC IMPLEMENTATION REQUIREMENTS:
+
+            **Task-Focused Development:**
+            1. Focus ONLY on this specific task - do not implement unrelated features
+            2. Build upon existing files and patterns where applicable
+            3. Create only the files and code necessary for THIS task
+            4. Ensure compatibility with existing codebase structure
+            5. Follow the established naming conventions and code organization
+
+            **Quality Standards:**
+            6. Write production-ready, maintainable code
+            7. Include comprehensive error handling and validation
+            8. Add meaningful comments for complex logic
+            9. Follow language-specific best practices and idioms
+            10. Ensure type safety and proper resource management
+
+            **Integration Requirements:**
+            11. Respect existing API contracts and interfaces
+            12. Maintain backward compatibility where applicable
+            13. Update related configuration files if necessary
+            14. Ensure proper imports and module structure
+            15. Handle edge cases and error scenarios gracefully
+
+            **Package and Dependency Management:**
+            16. ALWAYS use the LATEST STABLE versions of packages and dependencies
+            17. Follow the MOST UP-TO-DATE installation guides and best practices
+            18. Use current syntax and API calls (avoid deprecated methods)
+            19. For frontend-only projects (Vue/React), use LOCAL data storage (SQLite, LocalStorage)
+            20. DO NOT create backend services unless explicitly specified in tech stack
+            21. If no backend is specified, use client-side data management only
+
+            **Testing Considerations:**
+            22. Write code that is easily testable
+            23. Include basic test files if this task involves core functionality
+            24. Consider mocking requirements for external dependencies
+            25. Ensure proper separation of concerns for unit testing
+
+            **Documentation Requirements:**
+            26. Update README or documentation files if this task changes user-facing functionality
+            27. Add inline documentation for public APIs
+            28. Include configuration examples where applicable
+
+            **CRITICAL TECHNOLOGY STACK GUIDELINES:**
+
+            FOR FRONTEND-ONLY PROJECTS (Vue, React):
+            - Use ONLY client-side technologies and local storage
+            - DO NOT create any backend servers (Express, Flask, etc.)
+            - Use localStorage, sessionStorage, or IndexedDB for data persistence
+            - For databases, use client-side options like SQLite WASM or similar
+            - Focus on component architecture and state management
+            - Use mock data or JSON files for initial data
+
+            FOR BACKEND-ONLY PROJECTS (Rust):
+            - Focus on API endpoints and server functionality
+            - Use appropriate databases (PostgreSQL, SQLite, etc.)
+            - Include proper error handling and logging
+            - Create comprehensive API documentation
+
+            FOR FULLSTACK PROJECTS:
+            - Create separate backend and frontend directories
+            - Ensure proper API communication between services
+            - Use appropriate databases and state management
+            - Include deployment configurations
+
+            PACKAGE VERSION REQUIREMENTS:
+            - Always use the latest stable versions (e.g., "^18.0.0", not "17.x")
+            - Check official documentation for current installation methods
+            - Use modern build tools (Vite instead of Webpack where applicable)
+            - Follow current best practices and avoid deprecated APIs
+
+            Return a JSON array of actions to be executed in order. Each action should be specific and complete:
+
+            CRITICAL REQUIREMENTS FOR ACTIONS:
+            - CreateDirectory: Create any necessary directory structure first
+            - Write: Create complete, functional files with all necessary content
+            - Update: Modify existing files with precise changes
+            - RunCommand: Include any build, install, or setup commands needed
+            - Each file should be complete and functional, not just a skeleton
+            - Include ALL necessary imports, dependencies, and configurations
+            - Ensure the task is fully implemented and ready for use
+
+            AVAILABLE ACTIONS AND THEIR EXACT JSON FORMAT:
+
+            {{
+                "Write": {{
+                    "path": "exact/file/path.ext",
+                    "content": "complete file content - MUST be valid and complete code"
+                }}
+            }}
+
+            {{
+                "Read": {{
+                    "path": "file/to/read.ext"
+                }}
+            }}
+
+            {{
+                "Update": {{
+                    "path": "existing/file.ext", 
+                    "content": "complete updated file content"
+                }}
+            }}
+
+            {{
+                "Replace": {{
+                    "path": "existing/file.ext",
+                    "old_content": "exact text to replace",
+                    "new_content": "replacement text"
+                }}
+            }}
+
+            {{
+                "Delete": {{
+                    "path": "file/to/delete.ext"
+                }}
+            }}
+
+            {{
+                "Move": {{
+                    "old_path": "current/path.ext",
+                    "new_path": "new/path.ext"
+                }}
+            }}
+
+            {{
+                "Copy": {{
+                    "old_path": "source/file.ext",
+                    "new_path": "destination/file.ext"
+                }}
+            }}
+
+            {{
+                "CreateDirectory": {{
+                    "path": "directory/path"
+                }}
+            }}
+
+            {{
+                "RemoveDirectory": {{
+                    "path": "directory/to/remove",
+                    "recursive": true
+                }}
+            }}
+
+            {{
+                "ListDirectory": {{
+                    "path": "directory/to/list",
+                    "recursive": false
+                }}
+            }}
+
+            {{
+                "Append": {{
+                    "path": "existing/file.ext",
+                    "content": "content to append to end of file"
+                }}
+            }}
+
+            {{
+                "Backup": {{
+                    "path": "file/to/backup.ext",
+                    "backup_suffix": ".bak"
+                }}
+            }}
+
+            {{
+                "SetPermissions": {{
+                    "path": "file/or/directory",
+                    "permissions": "755"
+                }}
+            }}
+
+            {{
+                "CreateSymlink": {{
+                    "target": "path/to/target",
+                    "link_path": "path/to/symlink"
+                }}
+            }}
+
+            {{
+                "RunCommand": {{
+                    "command": "shell command to execute",
+                    "env": [["ENV_VAR", "value"], ["ANOTHER_VAR", "value2"]]
+                }}
+            }}
+
+            {{
+                "Grep": {{
+                    "pattern": "search pattern or regex",
+                    "path": "file/or/directory/to/search",
+                    "recursive": true,
+                    "case_sensitive": false
+                }}
+            }}
+
+            {{
+                "Archive": {{
+                    "source_paths": ["file1.txt", "directory/", "file2.txt"],
+                    "archive_path": "backup.tar.gz",
+                    "format": "tar.gz"
+                }}
+            }}
+
+            {{
+                "Extract": {{
+                    "archive_path": "archive.tar.gz",
+                    "destination": "extract/destination/"
+                }}
+            }}
+
+            {{
+                "Download": {{
+                    "url": "https://example.com/file.zip",
+                    "destination": "local/file.zip"
+                }}
+            }}
+
+            {{
+                "Watch": {{
+                    "path": "file/or/directory/to/watch",
+                    "duration_seconds": 60
+                }}
+            }}
+
+            EXAMPLE ACTION ARRAY:
+            [
+                {{
+                    "CreateDirectory": {{
+                        "path": "src/components"
+                    }}
+                }},
+                {{
+                    "Write": {{
+                        "path": "src/components/TaskManager.tsx",
+                        "content": "import React from 'react';\n\ninterface Task {{\n  id: string;\n  title: string;\n  completed: boolean;\n}}\n\nconst TaskManager: React.FC = () => {{\n  const [tasks, setTasks] = React.useState<Task[]>([]);\n  return (\n    <div className=\"task-manager\">\n      <h1>Task Manager</h1>\n    </div>\n  );\n}};\n\nexport default TaskManager;"
+                    }}
+                }},
+                {{
+                    "Update": {{
+                        "path": "package.json",
+                        "content": "{{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {{\n    \"react\": \"^18.0.0\"\n  }}\n}}"
+                    }}
+                }},
+                {{
+                    "RunCommand": {{
+                        "command": "npm install",
+                        "env": []
+                    }}
+                }}
+            ]
+
+            CRITICAL JSON FORMATTING REQUIREMENTS:
+            - Return ONLY a valid JSON array of actions, no other text
+            - Escape all special characters in strings (quotes, backslashes, newlines)
+            - Use \\n for newlines, \\" for quotes, \\\\ for backslashes in content
+            - Ensure all braces and brackets are properly matched
+            - Do not include any comments or explanations outside the JSON
+            - Validate that your JSON can be parsed by standard JSON parsers
+
+            IMPORTANT GUIDELINES:
+            - Provide COMPLETE, working code - not placeholders or comments like "// TODO"
+            - Each file should compile/run successfully after creation
+            - Include all necessary imports, types, and dependencies
+            - Follow the existing project structure and conventions
+            - Make the implementation specific to the task requirements
+            - Ensure proper error handling and edge case coverage
+            - Test that your actions would create a functional implementation
+            - Double-check that all JSON is properly escaped and valid
+
+            Focus on quality over quantity - create exactly what's needed for this task, no more, no less.
+            "#,
+            task_title,
+            task_description,
+            task_priority,
+            task_complexity,
+            tags_section,
+            tech_stack,
+            dependencies_section,
+            criteria_section,
+            codebase_context,
+            files_section
         )
     }
 
@@ -1256,6 +1619,214 @@ impl Prompts {
             }}
             "#,
             files_section, performance_metrics, bottlenecks_section, tech_stack
+        )
+    }
+
+    /// Agent error recovery prompt for autonomous problem-solving
+    pub fn agent_error_recovery_prompt(
+        agent_name: &str,
+        agent_type: &str,
+        task_title: Option<&str>,
+        project_path: &str,
+        tech_stack: &str,
+        error_action_type: &str,
+        error_action_description: &str,
+        error_message: &str,
+        error_code: Option<i32>,
+        working_directory: Option<&str>,
+        retry_count: u32,
+        stdout: Option<&str>,
+        stderr: Option<&str>,
+        previous_actions: &[String],
+        project_structure: &[String],
+        relevant_files: &[(String, String)], // (relative_path, content) pairs
+    ) -> String {
+        let error_code_str = error_code.map_or("None".to_string(), |code| code.to_string());
+        let working_dir_str = working_directory.unwrap_or("Not specified");
+        let task_title_str = task_title.unwrap_or("No specific task");
+        let stdout_str = stdout.unwrap_or("No stdout");
+        let stderr_str = stderr.unwrap_or("No stderr");
+
+        let previous_actions_section = if previous_actions.is_empty() {
+            "No previous actions recorded".to_string()
+        } else {
+            previous_actions
+                .iter()
+                .enumerate()
+                .map(|(i, action)| format!("{}. {}", i + 1, action))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let project_structure_section = if project_structure.is_empty() {
+            "Project structure not available".to_string()
+        } else {
+            project_structure.join("\n")
+        };
+
+        let relevant_files_section = if relevant_files.is_empty() {
+            "No relevant files provided".to_string()
+        } else {
+            relevant_files
+                .iter()
+                .map(|(path, content)| {
+                    let extension = std::path::Path::new(path)
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .unwrap_or("");
+                    format!("### {}\n```{}\n{}\n```\n", path, extension, content)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        format!(
+            r#"# Agent Error Recovery and Problem Solving
+
+You are an intelligent software development agent with the ability to analyze action execution failures and provide autonomous recovery solutions. Your role is to diagnose problems, understand their root causes, and suggest precise corrective actions.
+
+## Context Information
+
+**Agent Details:**
+- Name: {}
+- Type: {}
+- Task: {}
+- Project Path: {}
+- Technology Stack: {}
+
+**Error Information:**
+- Action Type: {}
+- Action Description: {}
+- Error Message: {}
+- Exit Code: {}
+- Working Directory: {}
+- Retry Count: {}
+
+**Command Output:**
+```
+STDOUT:
+{}
+
+STDERR:
+{}
+```
+
+**Previous Actions:**
+{}
+
+**Project Structure:**
+```
+{}
+```
+
+**Relevant Files:**
+{}
+
+## Your Task
+
+Analyze the error and provide a comprehensive recovery plan. Consider:
+
+1. **Root Cause Analysis**: What exactly went wrong and why?
+2. **Environmental Factors**: Are there missing dependencies, permissions, or configuration issues?
+3. **File System State**: Do required files/directories exist? Are permissions correct?
+4. **Command/Tool Issues**: Is the command syntax correct? Are required tools installed?
+5. **Project Configuration**: Are configuration files properly set up?
+6. **Dependency Issues**: Are all required packages/libraries available?
+
+## Output Format
+
+Provide your response as a JSON object with the following structure:
+
+```json
+{{
+  "analysis": "Detailed analysis of what went wrong and the context surrounding the failure",
+  "root_cause": "The fundamental reason for the failure in 1-2 sentences",
+  "confidence_level": 0.85,
+  "recovery_actions": [
+    {{
+      "action_type": "Command|FileModification|FileCreation|FileDeletion",
+      "description": "Clear description of what this action does",
+      "command": "exact command to run (if action_type is Command)",
+      "file_path": "path/to/file (if file operation)",
+      "content": "file content (if FileModification or FileCreation)",
+      "priority": 9,
+      "estimated_success_rate": 0.9
+    }}
+  ],
+  "preventive_measures": [
+    "Future steps to prevent similar errors",
+    "Configuration changes or checks to add"
+  ],
+  "should_retry_original": true,
+  "estimated_recovery_time": 5
+}}
+```
+
+## Recovery Action Guidelines
+
+**Priority Levels (1-10):**
+- 10: Critical - Must be done first (e.g., fix syntax errors, install missing tools)
+- 8-9: High - Important for success (e.g., create missing directories, fix permissions)
+- 5-7: Medium - Helpful optimizations (e.g., update configurations)
+- 1-4: Low - Nice-to-have improvements
+
+**Action Types:**
+- **Command**: Execute a shell command
+- **FileModification**: Update existing file content
+- **FileCreation**: Create a new file
+- **FileDeletion**: Remove a file or directory
+
+**Best Practices:**
+- Be specific and actionable
+- Consider the technology stack and project context
+- Prioritize actions that address the root cause
+- Include verification steps where appropriate
+- Consider rollback strategies for risky operations
+- Suggest incremental changes over major refactoring
+
+## Common Error Patterns
+
+**Dependency Issues:**
+- Missing package managers (npm, cargo, pip)
+- Uninstalled dependencies
+- Version conflicts
+- Lock file inconsistencies
+
+**Configuration Problems:**
+- Missing environment variables
+- Incorrect file paths
+- Wrong permissions
+- Missing configuration files
+
+**Build/Compilation Errors:**
+- Syntax errors in code
+- Missing imports/modules
+- Type errors
+- Build tool configuration issues
+
+**Runtime Errors:**
+- Port conflicts
+- File system permissions
+- Network connectivity
+- Resource constraints
+
+Remember: Your goal is to provide actionable, precise solutions that an automated system can execute to recover from the error and continue with the original task."#,
+            agent_name,
+            agent_type,
+            task_title_str,
+            project_path,
+            tech_stack,
+            error_action_type,
+            error_action_description,
+            error_message,
+            error_code_str,
+            working_dir_str,
+            retry_count,
+            stdout_str,
+            stderr_str,
+            previous_actions_section,
+            project_structure_section,
+            relevant_files_section
         )
     }
 }

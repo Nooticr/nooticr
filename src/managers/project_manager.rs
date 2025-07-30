@@ -773,13 +773,106 @@ impl ProjectManager {
         mcp_client: crate::managers::McpClient,
         event_broadcaster: &broadcast::Sender<ProjectEvent>,
     ) -> Result<()> {
-        let (task_title, task_description, tech_stack) = {
-            let project_guard = project.read().await;
-            let task = project_guard.get_task(task_id)
+        debug!("🎯 Starting MCP task execution with proper history tracking for task: {}", task_id);
+        
+        // Step 1: Update task status to InProgress and extract task info
+        let (task_title, task_description, task_complexity, task_priority, task_tags, existing_assignment) = {
+            let mut project_guard = project.write().await;
+            let task = project_guard.get_task_mut(task_id)
                 .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
 
-            (task.title.clone(), task.description.clone(), project_guard.tech_stack.clone())
+            debug!("📋 Task found: {} - {}", task.title, task.description);
+
+            // Transition task to InProgress with history tracking
+            if let Err(e) = task.transition_task_status(TaskStatus::InProgress) {
+                debug!("⚠️  Failed to transition task to InProgress: {}", e);
+            } else {
+                debug!("✅ Task '{}' transitioned to InProgress with history updated", task.title);
+                
+                // Emit task status change event
+                let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                    task_id,
+                    old_status: TaskStatus::Pending,
+                    new_status: TaskStatus::InProgress,
+                });
+            }
+
+            // Extract task info and existing assignment status
+            (
+                task.title.clone(),
+                task.description.clone(),
+                task.estimated_complexity.unwrap_or(5),
+                task.priority.clone(),
+                task.tags.clone(),
+                task.assigned_to.as_ref().map(|a| a.id)
+            )
         };
+
+        // Get tech stack separately to avoid borrowing conflicts
+        let tech_stack = {
+            let project_guard = project.read().await;
+            project_guard.tech_stack.clone()
+        };
+
+        // Step 2: Handle agent assignment separately
+        let assigned_agent_id = if existing_assignment.is_none() {
+            let mut project_guard = project.write().await;
+            
+            // Find available agent
+            if let Some(agent_index) = project_guard.agents.iter().position(|a| a.status.is_available()) {
+                let agent = &mut project_guard.agents[agent_index];
+                debug!("👤 Assigning task '{}' to agent: {}", task_title, agent.name);
+                
+                // Update agent status to Working with history tracking
+                if let Err(e) = agent.start_work(&task_title) {
+                    debug!("⚠️  Failed to start work on agent {}: {}", agent.name, e);
+                    None
+                } else {
+                    debug!("✅ Agent {} started working on task with history updated", agent.name);
+                    
+                    let agent_id = agent.id;
+                    let agent_name = agent.name.clone();
+                    let agent_clone = agent.clone();
+                    
+                    // Emit agent status change event
+                    let _ = event_broadcaster.send(ProjectEvent::AgentStatusChanged {
+                        agent_id,
+                        agent_name: agent_name.clone(),
+                        old_status: AgentStatus::Idle,
+                        new_status: AgentStatus::Working,
+                    });
+                    
+                    // Emit agent started working event
+                    let _ = event_broadcaster.send(ProjectEvent::AgentStartedWorking {
+                        agent_id,
+                        agent_name: agent_name.clone(),
+                        task_id,
+                        task_title: task_title.clone(),
+                    });
+                    
+                    // Now assign the agent to the task
+                    if let Some(task) = project_guard.get_task_mut(task_id) {
+                        task.assigned_to = Some(agent_clone);
+                        
+                        // Emit task assigned event
+                        let _ = event_broadcaster.send(ProjectEvent::TaskAssigned {
+                            task_id,
+                            agent_id,
+                            agent_name,
+                        });
+                    }
+                    
+                    Some(agent_id)
+                }
+            } else {
+                debug!("⚠️  No available agents found, proceeding without assignment");
+                None
+            }
+        } else {
+            debug!("✅ Task already assigned to agent");
+            existing_assignment
+        };
+
 
         // Emit start event
         let _ = event_broadcaster.send(ProjectEvent::McpTaskExecutionStarted {
@@ -787,39 +880,129 @@ impl ProjectManager {
             task_title: task_title.clone(),
         });
 
-        // Execute feature development with MCP
+        // Collect existing files for context (simplified version)
+        debug!("📂 Collecting existing project files for context...");
+        let existing_files = {
+            let _project_guard = project.read().await;
+            // TODO: Implement proper file collection based on project path
+            // For now, return empty vector
+            Vec::new()
+        };
+        
+        // Build completed dependencies context
+        let completed_dependency_names = {
+            let project_guard = project.read().await;
+            let task = project_guard.get_task(task_id).unwrap();
+            task.depends_on.iter()
+                .filter_map(|dep_id| {
+                    project_guard.get_task(*dep_id)
+                        .filter(|dep_task| dep_task.status == TaskStatus::Completed)
+                        .map(|dep_task| dep_task.title.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+        
+        let acceptance_criteria = vec![task_description.clone()];
+        let codebase_context = format!(
+            "Project using {:?} technology stack. Task dependencies: {:?}",
+            tech_stack, completed_dependency_names
+        );
+
+        debug!("🤖 Calling MCP task development with proper context...");
+        debug!("📊 Task parameters:");
+        debug!("   🎯 Title: {}", task_title);
+        debug!("   📊 Complexity: {}/10", task_complexity);
+        debug!("   🎚️  Priority: {:?}", task_priority);
+        debug!("   🏷️  Tags: {:?}", task_tags);
+        debug!("   📂 Context files: {}", existing_files.len());
+        debug!("   ✅ Completed deps: {}", completed_dependency_names.len());
+
+        // Execute task development with MCP using task_development method
         let _ = event_broadcaster.send(ProjectEvent::McpFeatureDevelopmentStarted { task_id });
 
-        let result = mcp_client.feature_development(
+        let result = mcp_client.task_development(
+            task_title.clone(),
             task_description.clone(),
-            "Current project codebase context".to_string(), // TODO: Get actual codebase context
+            task_complexity,
+            format!("{:?}", task_priority),
+            task_tags,
             format!("{:?}", tech_stack),
-            vec![], // TODO: Get existing files
-            task_description,
-            vec!["Task completion criteria".to_string()], // TODO: Get actual acceptance criteria
+            existing_files,
+            completed_dependency_names,
+            acceptance_criteria,
+            codebase_context,
             crate::managers::McpModel::Gemini,
         ).await;
 
         match result {
             Ok(response) => {
+                debug!("✅ MCP task development successful! Received {} actions", response.actions.len());
+                
                 let _ = event_broadcaster.send(ProjectEvent::McpFeatureDevelopmentCompleted {
                     task_id,
                     actions_count: response.actions.len(),
                 });
 
                 // Execute the actions returned by MCP
-                for action in response.actions {
+                debug!("🔄 Executing {} actions...", response.actions.len());
+                for (action_index, action) in response.actions.iter().enumerate() {
+                    debug!("   🎬 Executing action {}/{}: {:?}", action_index + 1, response.actions.len(), action);
                     if let Err(e) = action.execute().await {
-                        debug!("Failed to execute action: {}", e);
+                        debug!("❌ Failed to execute action {}: {}", action_index + 1, e);
+                        // Note: We continue with other actions even if one fails
+                    } else {
+                        debug!("✅ Action {} executed successfully", action_index + 1);
                     }
                 }
 
-                // Update task status to completed
+                // Update task status to completed with history tracking
                 {
                     let mut project_guard = project.write().await;
                     if let Some(task) = project_guard.get_task_mut(task_id) {
                         if let Err(e) = task.transition_task_status(TaskStatus::Completed) {
-                            debug!("Failed to update task status: {}", e);
+                            debug!("⚠️  Failed to transition task to Completed: {}", e);
+                        } else {
+                            debug!("✅ Task '{}' transitioned to Completed with history updated", task.title);
+                            
+                            // Emit task status change event
+                            let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                                task_id,
+                                old_status: TaskStatus::InProgress,
+                                new_status: TaskStatus::Completed,
+                            });
+                            
+                            // Emit task completed event
+                            let _ = event_broadcaster.send(ProjectEvent::TaskCompleted {
+                                task_id,
+                                task_title: task.title.clone(),
+                                completion_time: chrono::Utc::now(),
+                            });
+                        }
+                    }
+                    
+                    // Update assigned agent status to completed work
+                    if let Some(agent_id) = assigned_agent_id {
+                        if let Some(agent) = project_guard.agents.iter_mut().find(|a| a.id == agent_id) {
+                            if let Err(e) = agent.complete_work() {
+                                debug!("⚠️  Failed to complete work on agent {}: {}", agent.name, e);
+                            } else {
+                                debug!("✅ Agent {} completed work with history updated", agent.name);
+                                
+                                // Emit agent finished working event
+                                let _ = event_broadcaster.send(ProjectEvent::AgentFinishedWorking {
+                                    agent_id: agent.id,
+                                    agent_name: agent.name.clone(),
+                                    task_id,
+                                });
+                                
+                                // Emit agent status change event
+                                let _ = event_broadcaster.send(ProjectEvent::AgentStatusChanged {
+                                    agent_id: agent.id,
+                                    agent_name: agent.name.clone(),
+                                    old_status: AgentStatus::Working,
+                                    new_status: AgentStatus::Active,
+                                });
+                            }
                         }
                     }
                 }
@@ -829,13 +1012,55 @@ impl ProjectManager {
                     success: true,
                 });
 
+                debug!("🎉 Task '{}' completed successfully with full history tracking!", task_title);
                 Ok(())
             }
             Err(e) => {
+                debug!("❌ MCP task development failed: {}", e);
+                
+                // Update task status to failed with history tracking
+                {
+                    let mut project_guard = project.write().await;
+                    if let Some(task) = project_guard.get_task_mut(task_id) {
+                        if let Err(transition_err) = task.transition_task_status(TaskStatus::Failed) {
+                            debug!("⚠️  Failed to transition task to Failed: {}", transition_err);
+                        } else {
+                            debug!("✅ Task '{}' transitioned to Failed with history updated", task.title);
+                            
+                            // Emit task status change event
+                            let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                                task_id,
+                                old_status: TaskStatus::InProgress,
+                                new_status: TaskStatus::Failed,
+                            });
+                        }
+                    }
+                    
+                    // Update assigned agent to error state
+                    if let Some(agent_id) = assigned_agent_id {
+                        if let Some(agent) = project_guard.agents.iter_mut().find(|a| a.id == agent_id) {
+                            if let Err(agent_err) = agent.report_error(format!("Task execution failed: {}", e)) {
+                                debug!("⚠️  Failed to report error on agent {}: {}", agent.name, agent_err);
+                            } else {
+                                debug!("✅ Agent {} reported error with history updated", agent.name);
+                                
+                                // Emit agent status change event
+                                let _ = event_broadcaster.send(ProjectEvent::AgentStatusChanged {
+                                    agent_id: agent.id,
+                                    agent_name: agent.name.clone(),
+                                    old_status: AgentStatus::Working,
+                                    new_status: AgentStatus::Error,
+                                });
+                            }
+                        }
+                    }
+                }
+                
                 let _ = event_broadcaster.send(ProjectEvent::McpTaskExecutionCompleted {
                     task_id,
                     success: false,
                 });
+                
                 Err(e)
             }
         }

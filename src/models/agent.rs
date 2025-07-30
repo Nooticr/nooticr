@@ -1,11 +1,16 @@
 use super::agent_status_change::AgentStatusChange;
+use super::agent_error_recovery::{ActionError, ErrorRecoveryContext, ErrorRecoveryResponse, FileContext};
 use crate::enums::{AgentStatus, AgentType};
 use crate::error::{OrchestratorError, Result};
+use crate::managers::McpClient;
+use crate::prompts::Prompts;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::collections::HashMap;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use tracing::debug;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +27,12 @@ pub struct Agent {
     pub last_active_at: Option<DateTime<Utc>>,
     pub error_count: u32,
     pub total_tasks_completed: u64,
+    // Error recovery fields
+    pub recent_errors: Vec<ActionError>,
+    pub recovery_attempts: u32,
+    pub last_error_recovery_at: Option<DateTime<Utc>>,
+    pub autonomous_recovery_enabled: bool,
+    pub max_recovery_attempts: u32,
 }
 
 impl Agent {
@@ -52,6 +63,12 @@ impl Agent {
             last_active_at: None,
             error_count: 0,
             total_tasks_completed: 0,
+            // Error recovery initialization
+            recent_errors: Vec::new(),
+            recovery_attempts: 0,
+            last_error_recovery_at: None,
+            autonomous_recovery_enabled: true,
+            max_recovery_attempts: 3,
         }
     }
 
@@ -83,6 +100,12 @@ impl Agent {
             last_active_at: None,
             error_count: 0,
             total_tasks_completed: 0,
+            // Error recovery initialization
+            recent_errors: Vec::new(),
+            recovery_attempts: 0,
+            last_error_recovery_at: None,
+            autonomous_recovery_enabled: true,
+            max_recovery_attempts: 3,
         }
     }
 
@@ -503,6 +526,300 @@ impl Agent {
         let contents = tokio::fs::read_to_string(&file_path).await?;
         let agent: Agent = serde_json::from_str(&contents)?;
         Ok(agent)
+    }
+
+    // ===== ERROR RECOVERY METHODS =====
+
+    /// Record an action error for later recovery analysis
+    pub fn record_action_error(&mut self, error: ActionError) {
+        self.recent_errors.push(error);
+        self.error_count += 1;
+        self.updated_at = Utc::now();
+
+        // Keep only the last 10 errors to prevent memory bloat
+        if self.recent_errors.len() > 10 {
+            self.recent_errors.drain(0..self.recent_errors.len() - 10);
+        }
+    }
+
+    /// Check if agent should attempt autonomous recovery
+    pub fn should_attempt_recovery(&self) -> bool {
+        self.autonomous_recovery_enabled && 
+        self.recovery_attempts < self.max_recovery_attempts &&
+        !self.recent_errors.is_empty()
+    }
+
+    /// Collect relevant project files for error context
+    async fn collect_relevant_files(
+        &self, 
+        project_path: &PathBuf, 
+        error: &ActionError,
+        max_files: usize
+    ) -> Result<Vec<FileContext>> {
+        let mut relevant_files = Vec::new();
+        
+        // Collect files based on error context
+        let search_patterns = match error.action_type.as_str() {
+            "CommandExecution" => vec!["package.json", "Cargo.toml", "requirements.txt", "*.config.*"],
+            "FileOperation" => {
+                if let Some(working_dir) = &error.working_directory {
+                    let parent = working_dir.parent().unwrap_or(working_dir);
+                    vec![&parent.to_string_lossy()]
+                } else {
+                    vec!["src/*", "*.json", "*.toml", "*.yaml"]
+                }
+            },
+            _ => vec!["*.json", "*.toml", "*.yaml", "*.md", "src/*"],
+        };
+
+        // Try to collect files matching patterns
+        for pattern in search_patterns {
+            if relevant_files.len() >= max_files {
+                break;
+            }
+
+            // Simple pattern matching for common files
+            let files_to_check = if pattern.contains('*') {
+                self.glob_files(project_path, pattern).await.unwrap_or_default()
+            } else {
+                vec![project_path.join(pattern)]
+            };
+
+            for file_path in files_to_check {
+                if relevant_files.len() >= max_files {
+                    break;
+                }
+
+                if file_path.exists() && file_path.is_file() {
+                    match FileContext::from_path(file_path, project_path).await {
+                        Ok(mut file_context) => {
+                            file_context.truncate_content(2000); // Limit content size
+                            relevant_files.push(file_context);
+                        }
+                        Err(_) => continue, // Skip files we can't read
+                    }
+                }
+            }
+        }
+
+        Ok(relevant_files)
+    }
+
+    /// Simple glob-like file matching
+    async fn glob_files(&self, base_path: &PathBuf, pattern: &str) -> Result<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        
+        // Handle simple patterns like "*.json", "src/*"
+        if pattern.starts_with("*.") {
+            let extension = &pattern[2..];
+            self.collect_files_by_extension(base_path, extension, &mut files).await?;
+        } else if pattern.ends_with("/*") {
+            let dir_name = &pattern[..pattern.len()-2];
+            let dir_path = base_path.join(dir_name);
+            if dir_path.exists() && dir_path.is_dir() {
+                self.collect_files_in_directory(&dir_path, &mut files).await?;
+            }
+        } else {
+            // Exact file match
+            let file_path = base_path.join(pattern);
+            if file_path.exists() {
+                files.push(file_path);
+            }
+        }
+
+        Ok(files)
+    }
+
+    /// Collect files by extension recursively
+    async fn collect_files_by_extension(
+        &self, 
+        dir: &PathBuf, 
+        extension: &str, 
+        files: &mut Vec<PathBuf>
+    ) -> Result<()> {
+        if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension() {
+                        if ext == extension {
+                            files.push(path);
+                        }
+                    }
+                } else if path.is_dir() && files.len() < 20 {
+                    // Recurse into subdirectories but limit depth
+                    let _ = self.collect_files_by_extension(&path, extension, files).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Collect files in a specific directory
+    async fn collect_files_in_directory(&self, dir: &PathBuf, files: &mut Vec<PathBuf>) -> Result<()> {
+        if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.is_file() {
+                    files.push(path);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Build project structure snapshot
+    async fn build_project_structure(&self, project_path: &PathBuf) -> Vec<String> {
+        let mut structure = Vec::new();
+        
+        if let Ok(entries) = std::fs::read_dir(project_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                
+                if path.is_dir() {
+                    structure.push(format!("{}/", name));
+                    
+                    // Add some files from important directories
+                    if matches!(name.as_str(), "src" | "lib" | "app" | "components") {
+                        if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                            for sub_entry in sub_entries.flatten().take(5) {
+                                let sub_name = sub_entry.file_name().to_string_lossy();
+                                structure.push(format!("  {}/{}", name, sub_name));
+                            }
+                        }
+                    }
+                } else {
+                    structure.push(name);
+                }
+            }
+        }
+
+        structure.sort();
+        structure
+    }
+
+    /// Attempt autonomous error recovery using MCP
+    pub async fn attempt_error_recovery(
+        &mut self,
+        mcp_client: &McpClient,
+        project_path: PathBuf,
+        tech_stack: String,
+        task_title: Option<String>,
+        previous_actions: Vec<String>,
+    ) -> Result<ErrorRecoveryResponse> {
+        if !self.should_attempt_recovery() {
+            return Err(OrchestratorError::agent_constraint(
+                "Agent not eligible for autonomous recovery"
+            ));
+        }
+
+        let last_error = self.recent_errors.last()
+            .ok_or_else(|| OrchestratorError::validation("No recent errors to recover from"))?;
+
+        debug!("🔧 Agent {} attempting autonomous recovery for error: {}", 
+               self.name, last_error.error_message);
+
+        // Increment recovery attempts
+        self.recovery_attempts += 1;
+        self.last_error_recovery_at = Some(Utc::now());
+        self.updated_at = Utc::now();
+
+        // Collect context for recovery
+        let relevant_files = self.collect_relevant_files(&project_path, last_error, 5).await?;
+        let project_structure = self.build_project_structure(&project_path).await;
+
+        // Convert FileContext to (String, String) for prompt
+        let relevant_files_for_prompt: Vec<(String, String)> = relevant_files
+            .iter()
+            .map(|fc| (fc.relative_path.clone(), fc.content.clone()))
+            .collect();
+
+        // Generate error recovery prompt
+        let prompt = Prompts::agent_error_recovery_prompt(
+            &self.name,
+            &format!("{:?}", self.agent_type),
+            task_title.as_deref(),
+            &project_path.to_string_lossy(),
+            &tech_stack,
+            &last_error.action_type,
+            &last_error.action_description,
+            &last_error.error_message,
+            last_error.error_code,
+            last_error.working_directory.as_deref().map(|p| p.to_string_lossy().as_ref()),
+            last_error.retry_count,
+            last_error.stdout.as_deref(),
+            last_error.stderr.as_deref(),
+            &previous_actions,
+            &project_structure,
+            &relevant_files_for_prompt,
+        );
+
+        debug!("🧠 Sending error recovery request to LLM for agent {}", self.name);
+
+        // Call LLM for error recovery analysis
+        match mcp_client.error_recovery_analysis(prompt, crate::managers::McpModel::Gemini).await {
+            Ok(response) => {
+                debug!("✅ Agent {} received recovery response with {} actions", 
+                       self.name, response.recovery_actions.len());
+                
+                // Update agent status to indicate recovery is in progress
+                let _ = self.transition_to(
+                    AgentStatus::Maintenance, 
+                    Some("Attempting autonomous error recovery".to_string())
+                );
+
+                Ok(response)
+            }
+            Err(e) => {
+                debug!("❌ Agent {} error recovery analysis failed: {}", self.name, e);
+                
+                // Mark recovery attempt as failed
+                let _ = self.report_error(format!("Error recovery analysis failed: {}", e));
+                
+                Err(e)
+            }
+        }
+    }
+
+    /// Check if agent has recent errors that need attention
+    pub fn needs_error_attention(&self) -> bool {
+        !self.recent_errors.is_empty() && 
+        self.error_count > 0 &&
+        self.recovery_attempts < self.max_recovery_attempts
+    }
+
+    /// Get the most recent action error
+    pub fn get_latest_error(&self) -> Option<&ActionError> {
+        self.recent_errors.last()
+    }
+
+    /// Clear recent errors (called after successful recovery)
+    pub fn clear_recent_errors(&mut self) {
+        self.recent_errors.clear();
+        self.recovery_attempts = 0;
+        self.updated_at = Utc::now();
+    }
+
+    /// Enable or disable autonomous recovery
+    pub fn set_autonomous_recovery(&mut self, enabled: bool) {
+        self.autonomous_recovery_enabled = enabled;
+        self.updated_at = Utc::now();
+    }
+
+    /// Set maximum recovery attempts
+    pub fn set_max_recovery_attempts(&mut self, max_attempts: u32) {
+        self.max_recovery_attempts = max_attempts;
+        self.updated_at = Utc::now();
+    }
+
+    /// Get recovery statistics
+    pub fn get_recovery_stats(&self) -> (u32, u32, Option<DateTime<Utc>>) {
+        (
+            self.recovery_attempts,
+            self.recent_errors.len() as u32,
+            self.last_error_recovery_at,
+        )
     }
 }
 

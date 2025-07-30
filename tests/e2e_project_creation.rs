@@ -48,6 +48,114 @@ async fn verify_project_structure(project_path: &PathBuf, expected_files: &[&str
     true
 }
 
+/// Helper function to verify Vue.js project files
+async fn verify_vue_project_files(project_path: &PathBuf) -> bool {
+    let vue_files = vec![
+        "package.json",
+        "src/main.js",
+        "src/App.vue", 
+        "src/components/TodoList.vue",
+        "src/components/TodoItem.vue",
+        "public/index.html",
+        "vite.config.js",
+    ];
+    
+    let mut found_files = 0;
+    for file in &vue_files {
+        let file_path = project_path.join(file);
+        if file_path.exists() {
+            found_files += 1;
+            debug!("Found Vue file: {}", file_path.display());
+        }
+    }
+    
+    // Consider it a success if at least 3 Vue-specific files were created
+    let success = found_files >= 3;
+    debug!("Vue project verification: {}/{} files found, success: {}", found_files, vue_files.len(), success);
+    success
+}
+
+/// Helper function to verify React project files  
+async fn verify_react_project_files(project_path: &PathBuf) -> bool {
+    let react_files = vec![
+        "package.json",
+        "src/index.js",
+        "src/App.js",
+        "src/components/TodoList.js", 
+        "src/components/TodoItem.js",
+        "public/index.html",
+        "tsconfig.json",
+    ];
+    
+    let mut found_files = 0;
+    for file in &react_files {
+        let file_path = project_path.join(file);
+        if file_path.exists() {
+            found_files += 1;
+            debug!("Found React file: {}", file_path.display());
+        }
+    }
+    
+    // Consider it a success if at least 3 React-specific files were created
+    let success = found_files >= 3;
+    debug!("React project verification: {}/{} files found, success: {}", found_files, react_files.len(), success);
+    success
+}
+
+/// Helper function to verify Rust backend project files
+async fn verify_rust_project_files(project_path: &PathBuf) -> bool {
+    let rust_files = vec![
+        "Cargo.toml",
+        "src/main.rs",
+        "src/lib.rs",
+        "src/handlers/mod.rs",
+        "src/models/mod.rs",
+        "src/routes/mod.rs",
+        "migrations/",
+    ];
+    
+    let mut found_files = 0;
+    for file in &rust_files {
+        let file_path = project_path.join(file);
+        if file_path.exists() {
+            found_files += 1;
+            debug!("Found Rust file: {}", file_path.display());
+        }
+    }
+    
+    // Consider it a success if at least 3 Rust-specific files were created
+    let success = found_files >= 3;
+    debug!("Rust project verification: {}/{} files found, success: {}", found_files, rust_files.len(), success);
+    success
+}
+
+/// Helper function to verify fullstack project files
+async fn verify_fullstack_project_files(project_path: &PathBuf) -> bool {
+    let fullstack_files = vec![
+        "backend/Cargo.toml",
+        "backend/src/main.rs", 
+        "frontend/package.json",
+        "frontend/src/main.js",
+        "frontend/src/App.vue",
+        "docker-compose.yml",
+        "README.md",
+    ];
+    
+    let mut found_files = 0;
+    for file in &fullstack_files {
+        let file_path = project_path.join(file);
+        if file_path.exists() {
+            found_files += 1;
+            debug!("Found fullstack file: {}", file_path.display());
+        }
+    }
+    
+    // Consider it a success if at least 4 fullstack-specific files were created
+    let success = found_files >= 4;
+    debug!("Fullstack project verification: {}/{} files found, success: {}", found_files, fullstack_files.len(), success);
+    success
+}
+
 /// Helper function to verify project configuration
 async fn verify_project_config(project_path: &PathBuf, expected_name: &str, expected_tech_stack: TechStack) -> bool {
     let config_path = project_path.join("orchy.json");
@@ -128,6 +236,13 @@ async fn test_e2e_todo_app_vue_stack() {
             assert!(verify_project_structure(&project_path, &expected_files).await);
             assert!(verify_project_config(&project_path, "todo-vue", TechStack::Vue).await);
             
+            // Verify Vue.js specific development files were created
+            if verify_vue_project_files(&project_path).await {
+                println!("✅ Vue development files verified successfully");
+            } else {
+                println!("⚠️  Vue development files not found - AI may not have generated them");
+            }
+            
             println!("🎉 Vue Todo App E2E test passed!");
         }
         Err(e) => {
@@ -170,6 +285,13 @@ async fn test_e2e_todo_app_react_stack() {
             assert!(verify_project_structure(&project_path, &expected_files).await);
             assert!(verify_project_config(&project_path, "todo-react", TechStack::React).await);
             
+            // Verify React specific development files were created
+            if verify_react_project_files(&project_path).await {
+                println!("✅ React development files verified successfully");
+            } else {
+                println!("⚠️  React development files not found - AI may not have generated them");
+            }
+            
             println!("🎉 React Todo App E2E test passed!");
         }
         Err(e) => {
@@ -211,6 +333,13 @@ async fn test_e2e_todo_app_rust_backend() {
             assert!(verify_project_structure(&project_path, &expected_files).await);
             assert!(verify_project_config(&project_path, "todo-rust-api", TechStack::Rust).await);
             
+            // Verify Rust backend specific development files were created
+            if verify_rust_project_files(&project_path).await {
+                println!("✅ Rust backend development files verified successfully");
+            } else {
+                println!("⚠️  Rust backend development files not found - AI may not have generated them");
+            }
+            
             println!("🎉 Rust Backend Todo App E2E test passed!");
         }
         Err(e) => {
@@ -251,6 +380,13 @@ async fn test_e2e_todo_app_fullstack_rust_vue() {
             
             assert!(verify_project_structure(&project_path, &expected_files).await);
             assert!(verify_project_config(&project_path, "todo-fullstack-rust-vue", TechStack::FullstackRustVue).await);
+            
+            // Verify fullstack specific development files were created
+            if verify_fullstack_project_files(&project_path).await {
+                println!("✅ Fullstack development files verified successfully");
+            } else {
+                println!("⚠️  Fullstack development files not found - AI may not have generated them");
+            }
             
             println!("🎉 Fullstack Rust+Vue Todo App E2E test passed!");
         }

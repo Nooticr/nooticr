@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
 
 /// Supported AI models for MCP
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -53,6 +53,21 @@ pub enum McpCommand {
         existing_files: Vec<(String, String)>,
         requirements: String,
         acceptance_criteria: Vec<String>,
+        model: McpModel,
+        respond_to: oneshot::Sender<Result<FeatureDevelopmentResponse>>,
+    },
+    /// Execute task-specific development prompt
+    TaskDevelopment {
+        task_title: String,
+        task_description: String,
+        task_complexity: u8,
+        task_priority: String,
+        task_tags: Vec<String>,
+        tech_stack: String,
+        existing_files: Vec<(String, String)>,
+        completed_dependencies: Vec<String>,
+        acceptance_criteria: Vec<String>,
+        codebase_context: String,
         model: McpModel,
         respond_to: oneshot::Sender<Result<FeatureDevelopmentResponse>>,
     },
@@ -294,6 +309,37 @@ impl McpManager {
                     .await;
                 let _ = respond_to.send(result);
             }
+            McpCommand::TaskDevelopment {
+                task_title,
+                task_description,
+                task_complexity,
+                task_priority,
+                task_tags,
+                tech_stack,
+                existing_files,
+                completed_dependencies,
+                acceptance_criteria,
+                codebase_context,
+                model,
+                respond_to,
+            } => {
+                let result = self
+                    .execute_task_development(
+                        &task_title,
+                        &task_description,
+                        task_complexity,
+                        &task_priority,
+                        &task_tags,
+                        &tech_stack,
+                        &existing_files,
+                        &completed_dependencies,
+                        &acceptance_criteria,
+                        &codebase_context,
+                        model,
+                    )
+                    .await;
+                let _ = respond_to.send(result);
+            }
             McpCommand::CodeReview {
                 files_and_code,
                 requirements,
@@ -362,6 +408,50 @@ impl McpManager {
 
     /// Generate context content based on tech stack
     fn generate_context_content(&self, tech_stack: &TechStack) -> String {
+        // Try to load context from file first, fallback to generic content
+        if let Ok(context_content) = self.load_context_from_file(tech_stack) {
+            debug!("✅ Loaded context content from file for tech stack: {:?}", tech_stack);
+            context_content
+        } else {
+            debug!("⚠️  Using generic context content for tech stack: {:?}", tech_stack);
+            self.generate_generic_context_content(tech_stack)
+        }
+    }
+
+    /// Load context content from file based on tech stack
+    fn load_context_from_file(&self, tech_stack: &TechStack) -> Result<String> {
+        let context_filename = match tech_stack {
+            TechStack::Vue => "context.vue.md",
+            TechStack::React => "context.react.md", 
+            TechStack::Rust => "context.rust.asyncgraphql.md",
+            TechStack::FullstackRustVue => "context.vue.md", // Use Vue context for fullstack
+            TechStack::FullstackRustReact => "context.react.md", // Use React context for fullstack
+        };
+
+        let context_path = PathBuf::from("contexts").join(context_filename);
+        
+        debug!("🔍 Attempting to load context from: {:?}", context_path);
+        
+        if !context_path.exists() {
+            debug!("❌ Context file not found: {:?}", context_path);
+            return Err(OrchestratorError::internal(format!("Context file not found: {:?}", context_path)));
+        }
+
+        match std::fs::read_to_string(&context_path) {
+            Ok(content) => {
+                debug!("✅ Successfully loaded context file: {:?} ({} characters)", context_path, content.len());
+                Ok(content)
+            }
+            Err(e) => {
+                debug!("❌ Failed to read context file {:?}: {}", context_path, e);
+                // The #[from] std::io::Error will automatically convert this
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Generate generic context content as fallback
+    fn generate_generic_context_content(&self, tech_stack: &TechStack) -> String {
         format!(
             r#"# Project Context
 
@@ -443,6 +533,57 @@ Maintain separation of concerns and modular architecture.
 
         let execution_time = start_time.elapsed().as_millis() as u64;
         self.update_statistics("idea_breakdown", model, execution_time, true);
+
+        Ok(parsed_response)
+    }
+
+    /// Execute task-specific development prompt
+    async fn execute_task_development(
+        &mut self,
+        task_title: &str,
+        task_description: &str,
+        task_complexity: u8,
+        task_priority: &str,
+        task_tags: &[String],
+        tech_stack: &str,
+        existing_files: &[(String, String)],
+        completed_dependencies: &[String],
+        acceptance_criteria: &[String],
+        codebase_context: &str,
+        model: McpModel,
+    ) -> Result<FeatureDevelopmentResponse> {
+        let start_time = std::time::Instant::now();
+
+        let prompt = Prompts::task_development_user_prompt(
+            task_title,
+            task_description,
+            task_complexity,
+            task_priority,
+            task_tags,
+            tech_stack,
+            existing_files,
+            completed_dependencies,
+            acceptance_criteria,
+            codebase_context,
+        );
+
+        debug!("🎯 Task Development Prompt Details:");
+        debug!("   📋 Task: {}", task_title);
+        debug!("   🎚️  Priority: {}", task_priority);
+        debug!("   📊 Complexity: {}/10", task_complexity);
+        debug!("   🏷️  Tags: {:?}", task_tags);
+        debug!("   📂 Existing files: {}", existing_files.len());
+        debug!("   ✅ Completed dependencies: {}", completed_dependencies.len());
+        debug!("   ✔️  Acceptance criteria: {}", acceptance_criteria.len());
+
+        let response = self.execute_prompt(&prompt, model.clone()).await?;
+        let parsed_response: FeatureDevelopmentResponse = self.parse_json_response(&response)?;
+
+        let execution_time = start_time.elapsed().as_millis() as u64;
+        self.update_statistics("task_development", model, execution_time, true);
+
+        debug!("✅ Task development completed for: {}", task_title);
+        debug!("   🎬 Generated {} actions", parsed_response.actions.len());
 
         Ok(parsed_response)
     }
@@ -534,9 +675,14 @@ Maintain separation of concerns and modular architecture.
 
     /// Execute prompt with the specified model
     async fn execute_prompt(&self, prompt: &str, model: McpModel) -> Result<String> {
+        debug!("🤖 Executing prompt with model: {:?}", model);
+        debug!("📝 Prompt length: {} characters", prompt.len());
+        debug!("📝 Prompt preview: {}", &prompt[..prompt.len().min(200)]);
+        
         match model {
             McpModel::Gemini => {
                 if !self.gemini_available {
+                    debug!("❌ Gemini CLI not available");
                     return Err(OrchestratorError::internal("Gemini CLI not available"));
                 }
                 
@@ -544,15 +690,24 @@ Maintain separation of concerns and modular architecture.
                 let working_dir = self.project_path.as_ref()
                     .ok_or_else(|| OrchestratorError::internal("No project path set for MCP Manager"))?;
                 
-                GeminiCLI::query_with_session_from_dir(
+                debug!("📂 Using working directory: {:?}", working_dir);
+                debug!("🚀 Calling Gemini CLI with gemini-2.5-flash model...");
+                
+                let response = GeminiCLI::query_with_session_from_dir(
                     "mcp-session", 
                     prompt, 
                     Some("gemini-2.5-flash"), 
                     working_dir
-                ).await
+                ).await?;
+                
+                debug!("📥 Received response from Gemini ({} characters)", response.len());
+                debug!("📥 Response preview: {}", &response[..response.len().min(500)]);
+                
+                Ok(response)
             }
             McpModel::Claude => {
                 // Claude implementation would go here
+                debug!("❌ Claude integration not yet implemented");
                 Err(OrchestratorError::internal("Claude integration not yet implemented"))
             }
         }
@@ -563,21 +718,75 @@ Maintain separation of concerns and modular architecture.
     where
         T: for<'de> serde::Deserialize<'de>,
     {
+        debug!("🔍 Parsing JSON response for type: {}", std::any::type_name::<T>());
+        debug!("📄 Raw response length: {} characters", response.len());
+        
         // Try to extract JSON from response (handles markdown wrapping)
-        let json_str = GeminiCLI::extract_json_from_response(response)?;
+        let json_str = match GeminiCLI::extract_json_from_response(response) {
+            Ok(json) => {
+                debug!("✅ Extracted JSON successfully ({} characters)", json.len());
+                debug!("📄 Extracted JSON preview: {}", &json[..json.len().min(500)]);
+                json
+            }
+            Err(e) => {
+                debug!("❌ Failed to extract JSON: {}", e);
+                debug!("📄 Raw response: {}", response);
+                return Err(e);
+            }
+        };
 
         // Special handling for IdeaBreakdownResponse - the prompt returns an array but we expect an object
         if std::any::type_name::<T>().contains("IdeaBreakdownResponse") {
+            debug!("🔧 Special handling for IdeaBreakdownResponse");
             if json_str.trim().starts_with('[') {
+                debug!("📦 Wrapping array in object structure");
                 // Wrap the array in the expected object structure
                 let wrapped_json = format!(r#"{{"tasks": {}}}"#, json_str);
+                debug!("📦 Wrapped JSON: {}", wrapped_json);
                 return serde_json::from_str(&wrapped_json)
-                    .map_err(|e| OrchestratorError::json_parsing("AI model response (wrapped)", e));
+                    .map_err(|e| {
+                        debug!("❌ Failed to parse wrapped JSON: {}", e);
+                        OrchestratorError::json_parsing("AI model response (wrapped)", e)
+                    });
             }
         }
 
-        serde_json::from_str(&json_str)
-            .map_err(|e| OrchestratorError::json_parsing("AI model response", e))
+        // Special handling for FeatureDevelopmentResponse - the prompt expects an array but AI might return an object
+        if std::any::type_name::<T>().contains("FeatureDevelopmentResponse") {
+            debug!("🔧 Special handling for FeatureDevelopmentResponse");
+            if json_str.trim().starts_with('[') {
+                debug!("📦 Wrapping array in object structure for actions");
+                // Wrap the array in the expected object structure
+                let wrapped_json = format!(r#"{{"actions": {}}}"#, json_str);
+                debug!("📦 Wrapped JSON: {}", wrapped_json);
+                return serde_json::from_str(&wrapped_json)
+                    .map_err(|e| {
+                        debug!("❌ Failed to parse wrapped JSON: {}", e);
+                        OrchestratorError::json_parsing("AI model response (wrapped)", e)
+                    });
+            } else if json_str.trim().starts_with('{') {
+                // Check if it's already in the correct format
+                debug!("🔍 JSON appears to be an object, checking if it contains 'actions' field");
+                if json_str.contains("\"actions\"") {
+                    debug!("✅ Object already contains 'actions' field");
+                } else {
+                    debug!("❌ Object missing 'actions' field - this might be the issue");
+                }
+            }
+        }
+
+        debug!("🔄 Parsing JSON directly...");
+        match serde_json::from_str(&json_str) {
+            Ok(result) => {
+                debug!("✅ JSON parsing successful");
+                Ok(result)
+            }
+            Err(e) => {
+                debug!("❌ JSON parsing failed: {}", e);
+                debug!("📄 Failed JSON: {}", json_str);
+                Err(OrchestratorError::json_parsing("AI model response", e))
+            }
+        }
     }
 
     /// Update statistics
@@ -679,6 +888,41 @@ impl McpClient {
             existing_files,
             requirements,
             acceptance_criteria,
+            model,
+            respond_to: tx,
+        }).map_err(|e| OrchestratorError::channel(format!("Failed to send command: {}", e)))?;
+
+        rx.await.map_err(|_| OrchestratorError::internal("MCP Manager disconnected"))?
+    }
+
+    /// Execute task development
+    pub async fn task_development(
+        &self,
+        task_title: String,
+        task_description: String,
+        task_complexity: u8,
+        task_priority: String,
+        task_tags: Vec<String>,
+        tech_stack: String,
+        existing_files: Vec<(String, String)>,
+        completed_dependencies: Vec<String>,
+        acceptance_criteria: Vec<String>,
+        codebase_context: String,
+        model: McpModel,
+    ) -> Result<FeatureDevelopmentResponse> {
+        let (tx, rx) = oneshot::channel();
+
+        self.command_tx.send(McpCommand::TaskDevelopment {
+            task_title,
+            task_description,
+            task_complexity,
+            task_priority,
+            task_tags,
+            tech_stack,
+            existing_files,
+            completed_dependencies,
+            acceptance_criteria,
+            codebase_context,
             model,
             respond_to: tx,
         }).map_err(|e| OrchestratorError::channel(format!("Failed to send command: {}", e)))?;
