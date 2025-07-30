@@ -2,6 +2,7 @@ pub mod schema;
 pub mod models;
 pub mod repository;
 pub mod migrations;
+pub mod helpers;
 
 use crate::error::{OrchestratorError, Result};
 use rusqlite::{Connection, OpenFlags};

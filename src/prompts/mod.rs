@@ -1,3 +1,5 @@
+pub mod common;
+
 pub struct Prompts {}
 
 impl Prompts {
@@ -107,18 +109,10 @@ impl Prompts {
         requirements: &str,
         acceptance_criteria: &[String],
     ) -> String {
-        let files_section = existing_files
-            .iter()
-            .map(|(file_path, content)| format!("FILE: {}\n```\n{}\n```", file_path, content))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        use crate::prompts::common::PromptBuilder;
 
-        let criteria_section = acceptance_criteria
-            .iter()
-            .enumerate()
-            .map(|(i, criteria)| format!("{}. {}", i + 1, criteria))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let files_section = PromptBuilder::format_files_section(existing_files, None);
+        let criteria_section = PromptBuilder::format_acceptance_criteria(acceptance_criteria);
 
         format!(
             r#"Implement this specific task with comprehensive development approach:
