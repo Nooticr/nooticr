@@ -170,6 +170,7 @@ pub struct McpManager {
     statistics: McpStatistics,
     gemini_available: bool,
     claude_available: bool,
+    project_path: Option<PathBuf>,
 }
 
 impl McpManager {
@@ -188,6 +189,7 @@ impl McpManager {
             statistics: McpStatistics::default(),
             gemini_available: false,
             claude_available: false,
+            project_path: None,
         };
 
         (manager, command_tx, event_rx)
@@ -335,6 +337,9 @@ impl McpManager {
     async fn initialize_context(&mut self, project_path: &Path, tech_stack: &TechStack) -> Result<()> {
         let gemini_file = project_path.join("GEMINI.md");
         let claude_file = project_path.join("CLAUDE.md");
+
+        // Store the project path for future use
+        self.project_path = Some(project_path.to_path_buf());
 
         // Generate context content based on tech stack
         let context_content = self.generate_context_content(tech_stack);
@@ -534,7 +539,7 @@ Maintain separation of concerns and modular architecture.
                 if !self.gemini_available {
                     return Err(OrchestratorError::internal("Gemini CLI not available"));
                 }
-                GeminiCLI::query(prompt).await
+                GeminiCLI::query_with_model(prompt, "gemini-1.5-flash").await
             }
             McpModel::Claude => {
                 // Claude implementation would go here
@@ -550,6 +555,16 @@ Maintain separation of concerns and modular architecture.
     {
         // Try to extract JSON from response (handles markdown wrapping)
         let json_str = GeminiCLI::extract_json_from_response(response)?;
+
+        // Special handling for IdeaBreakdownResponse - the prompt returns an array but we expect an object
+        if std::any::type_name::<T>().contains("IdeaBreakdownResponse") {
+            if json_str.trim().starts_with('[') {
+                // Wrap the array in the expected object structure
+                let wrapped_json = format!(r#"{{"tasks": {}}}"#, json_str);
+                return serde_json::from_str(&wrapped_json)
+                    .map_err(|e| OrchestratorError::json_parsing("AI model response (wrapped)", e));
+            }
+        }
 
         serde_json::from_str(&json_str)
             .map_err(|e| OrchestratorError::json_parsing("AI model response", e))
@@ -587,6 +602,7 @@ Maintain separation of concerns and modular architecture.
 }
 
 /// Client interface for the MCP Manager
+#[derive(Clone, Debug)]
 pub struct McpClient {
     command_tx: mpsc::UnboundedSender<McpCommand>,
 }
@@ -903,14 +919,14 @@ pub fn authenticate(username: &str, password: &str) -> bool {
     async fn test_json_parsing() {
         let (manager, _command_tx, _event_rx) = McpManager::new();
 
-        // Test parsing valid JSON
-        let json_response = r#"{"tasks": [{"title": "Test Task", "description": "Test", "priority": "High", "complexity": 5, "agent_type": "TestAgent", "tags": [], "depends_on": []}]}"#;
+        // Test parsing valid JSON - the prompt returns an array, parse_json_response should wrap it
+        let json_response = r#"[{"id": "test", "title": "Test Task", "description": "Test", "priority": "High", "complexity": 5, "agent_type": "TestAgent", "tags": [], "depends_on": []}]"#;
         let result: Result<IdeaBreakdownResponse> = manager.parse_json_response(json_response);
         assert!(result.is_ok());
 
         // Test parsing JSON wrapped in markdown
         let markdown_response = r#"```json
-{"tasks": [{"title": "Test Task", "description": "Test", "priority": "High", "complexity": 5, "agent_type": "TestAgent", "tags": [], "depends_on": []}]}
+[{"id": "test", "title": "Test Task", "description": "Test", "priority": "High", "complexity": 5, "agent_type": "TestAgent", "tags": [], "depends_on": []}]
 ```"#;
         let result: Result<IdeaBreakdownResponse> = manager.parse_json_response(markdown_response);
         assert!(result.is_ok());

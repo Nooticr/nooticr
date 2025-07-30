@@ -4,6 +4,7 @@ use crate::models::task::Task;
 use crate::models::issue::Issue;
 use crate::enums::{Priority, TechStack};
 use crate::utils::cli::*;
+use crate::managers::{McpManager, McpClient, McpModel, ProjectManager, ProjectCommand};
 use clap::ArgMatches;
 use std::collections::HashMap;
 use std::fs;
@@ -23,7 +24,7 @@ fn parse_tech_stack(tech_stack_str: &str) -> Result<TechStack, Box<dyn std::erro
     }
 }
 
-/// Handle the create project command
+/// Handle the create project command with full MCP and Project Manager integration
 pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let name = matches.get_one::<String>("name").unwrap();
     let idea = matches.get_one::<String>("idea").unwrap();
@@ -32,9 +33,9 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     let dependencies_urls = matches.get_one::<String>("dependencies-urls");
     let tech_stack_str = matches.get_one::<String>("tech-stack");
 
-    println!("Creating project: {}", name);
-    println!("Idea: {}", idea);
-    println!("Path: {}", path);
+    println!("🚀 Creating project: {}", name);
+    println!("💡 Idea: {}", idea);
+    println!("📁 Path: {}", path);
 
     // Parse tech stack
     let tech_stack = if let Some(ts) = tech_stack_str {
@@ -43,21 +44,49 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
         TechStack::default()
     };
 
+    println!("🔧 Tech Stack: {:?}", tech_stack);
+
+    // Create project directory if it doesn't exist
+    let project_path = PathBuf::from(path);
+    if !project_path.exists() {
+        fs::create_dir_all(&project_path)?;
+        println!("📂 Created project directory: {}", path);
+    }
+
+    // Initialize MCP Manager
+    println!("🤖 Starting MCP Manager...");
+    let (mcp_manager, mcp_command_tx, mut mcp_event_rx) = McpManager::new();
+    let mcp_client = McpClient::new(mcp_command_tx.clone());
+
+    // Start MCP Manager in background
+    let mcp_handle = tokio::spawn(async move {
+        if let Err(e) = mcp_manager.run().await {
+            eprintln!("MCP Manager error: {}", e);
+        }
+    });
+
+    // Initialize context files
+    println!("📝 Initializing context files...");
+    if let Err(e) = mcp_client.initialize_context(project_path.clone(), tech_stack.clone()).await {
+        eprintln!("Warning: Failed to initialize context files: {}", e);
+    } else {
+        println!("✅ Context files created (GEMINI.md, CLAUDE.md)");
+    }
+
     // Create the project with tech stack
     let mut project = Project::new_with_tech_stack(name, idea, path, tech_stack.clone());
-    println!("Tech Stack: {:?}", project.tech_stack);
 
     // Load agents from the agents directory
     if let Err(e) = project.load_agents_from_directory("agents").await {
         eprintln!("Warning: Failed to load agents from directory: {}", e);
     } else {
-        println!("Loaded {} agents from agents directory", project.agents.len());
+        println!("🤖 Loaded {} agents from agents directory", project.agents.len());
     }
 
     // Set optional repository URL
     if let Some(repo_url) = repository_url {
         project.set_repository_url(repo_url);
-        println!("Repository URL: {}", repo_url);
+        println!("🔗 Repository URL: {}", repo_url);
     }
 
     // Set optional dependency URLs
@@ -68,38 +97,81 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
                 eprintln!("Warning: Failed to add dependency URL '{}': {}", url, e);
             }
         }
-        println!("Dependencies: {:?}", urls);
+        println!("📦 Dependencies: {:?}", urls);
     }
 
-    // Create project directory if it doesn't exist
-    let project_path = PathBuf::from(path);
-    if !project_path.exists() {
-        fs::create_dir_all(&project_path)?;
-        println!("Created project directory: {}", path);
+    // Prepare agent types for idea breakdown
+    let available_agents: Vec<String> = project.agents.iter()
+        .map(|agent| agent.name.clone())
+        .collect();
+
+    // If no agents loaded, use default agent types based on tech stack
+    let agent_types = if available_agents.is_empty() {
+        match tech_stack {
+            TechStack::Rust => vec!["BackendEngineerRust".to_string()],
+            TechStack::Vue => vec!["FrontendEngineerVue".to_string()],
+            TechStack::React => vec!["FrontendEngineerReact".to_string()],
+            TechStack::FullstackRustVue => vec![
+                "BackendEngineerRust".to_string(),
+                "FrontendEngineerVue".to_string(),
+                "DevOpsEngineer".to_string(),
+            ],
+            TechStack::FullstackRustReact => vec![
+                "BackendEngineerRust".to_string(),
+                "FrontendEngineerReact".to_string(),
+                "DevOpsEngineer".to_string(),
+            ],
+        }
+    } else {
+        available_agents
+    };
+
+    // Execute idea breakdown using MCP Manager
+    println!("🧠 Breaking down idea into tasks using AI...");
+    let context = format!("Project: {}\nTech Stack: {:?}\nPath: {}", name, tech_stack, path);
+
+    match mcp_client.idea_breakdown(
+        idea.clone(),
+        context,
+        agent_types,
+        format!("{:?}", tech_stack),
+        McpModel::Gemini,
+    ).await {
+        Ok(breakdown_response) => {
+            println!("✅ Generated {} tasks from idea breakdown", breakdown_response.tasks.len());
+
+            // Convert TaskInput to Task and add to project
+            for task_input in breakdown_response.tasks {
+                let task = Task::from_input(task_input.clone(), None);
+                if let Err(e) = project.add_task(task) {
+                    eprintln!("Warning: Failed to add task '{}': {}", task_input.title, e);
+                } else {
+                    println!("  ✓ Added task: {}", task_input.title);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ CRITICAL ERROR: Failed to generate tasks from AI: {}", e);
+            eprintln!("🔧 This application requires a working Gemini API connection.");
+            eprintln!("📋 Please ensure:");
+            eprintln!("   • GEMINI_API_KEY environment variable is set correctly");
+            eprintln!("   • Gemini CLI is installed and configured");
+            eprintln!("   • Your API key has proper permissions");
+            eprintln!("   • You have internet connectivity");
+
+            // Shutdown managers before exiting
+            let _ = mcp_client.shutdown().await;
+            let _ = mcp_handle.await;
+
+            return Err(format!("MCP integration failed: {}", e).into());
+        }
     }
 
-
-    // read the right context depending on tech stack
-    // let context = match tech_stack {
-    //     TechStack::Rust => "context.rust.asyncgraphql.md",
-    //     TechStack::Vue => "context.vue.md",
-    //     TechStack::React => "context.react.md",
-    //     TechStack::FullstackRustVue => "context.rust.asyncgraphql.md",
-    //     TechStack::FullstackRustReact => "context.rust.asyncgraphql.md",
-    // };
-
-    // let full_contect_path = PathBuf::from("contexts").join(context);
-    // let content = fs::read_to_string(full_contect_path)?;
-
-    // // create the action
-    // let action = Action::Write {
-    //     path: project_path.join("GEMINI.md").to_str().unwrap().to_string(),
-    //     content,
-    // };
-
-    // // execute the action
-    // action.execute().await?;
-
+    // Initialize Project Manager with MCP integration
+    println!("📋 Starting Project Manager...");
+    let project_manager = ProjectManager::new(project.clone());
+    let project_command_tx = project_manager.get_command_sender();
+    let mut project_event_rx = project_manager.subscribe_to_events();
 
     // Save project configuration
     let config_path = project_path.join("orchy.json");
@@ -109,6 +181,19 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
     println!("✅ Project '{}' created successfully!", name);
     println!("📁 Project saved to: {}", config_path.display());
     println!("🆔 Project ID: {}", project.id);
+    println!("📊 Tasks created: {}", project.tasks.len());
+
+    // Shutdown managers
+    let _ = mcp_client.shutdown().await;
+    let _ = project_command_tx.send(ProjectCommand::Shutdown);
+
+    // Wait for MCP manager to shutdown
+    let _ = mcp_handle.await;
+
+    println!("🎉 Project setup complete! You can now:");
+    println!("   • View tasks: orchy list-tasks");
+    println!("   • Add agents: orchy add-agent");
+    println!("   • Start development: cd {} && orchy start", path);
 
     Ok(())
 }

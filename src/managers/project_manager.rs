@@ -48,10 +48,18 @@ pub enum ProjectEvent {
     SyncProgress { sync_type: String, completed: usize, total: usize },
     SyncCompleted { sync_type: String, success_count: usize, error_count: usize },
     SyncError { sync_type: String, error: String },
-    
+
+    // MCP Integration Events
+    McpTaskExecutionStarted { task_id: Uuid, task_title: String },
+    McpTaskExecutionCompleted { task_id: Uuid, success: bool },
+    McpFeatureDevelopmentStarted { task_id: Uuid },
+    McpFeatureDevelopmentCompleted { task_id: Uuid, actions_count: usize },
+
+    // Statistics Events
+    ProjectStatisticsUpdated { stats: ProjectStatistics },
+
     // Project Events
     ProjectStatusChanged { old_status: String, new_status: String },
-    ProjectStatisticsUpdated { stats: ProjectStatistics },
 }
 
 /// Project statistics for real-time updates
@@ -103,7 +111,11 @@ pub enum ProjectCommand {
     GetStatistics { respond_to: mpsc::UnboundedSender<ProjectStatistics> },
     GetTask { task_id: Uuid, respond_to: mpsc::UnboundedSender<Option<Task>> },
     GetAgent { agent_id: Uuid, respond_to: mpsc::UnboundedSender<Option<Agent>> },
-    
+
+    // MCP Integration
+    ExecuteTaskWithMcp { task_id: Uuid, mcp_client: crate::managers::McpClient, respond_to: mpsc::UnboundedSender<Result<()>> },
+    ProcessTaskCompletion { task_id: Uuid, mcp_client: crate::managers::McpClient, respond_to: mpsc::UnboundedSender<Result<()>> },
+
     // Shutdown
     Shutdown,
 }
@@ -407,6 +419,26 @@ impl ProjectManager {
                 ProjectCommand::GetProject { respond_to } => {
                     let project_clone = project.read().await.clone();
                     let _ = respond_to.send(project_clone);
+                }
+
+                ProjectCommand::ExecuteTaskWithMcp { task_id, mcp_client, respond_to } => {
+                    let result = Self::handle_execute_task_with_mcp(
+                        &project,
+                        task_id,
+                        mcp_client,
+                        &event_broadcaster
+                    ).await;
+                    let _ = respond_to.send(result);
+                }
+
+                ProjectCommand::ProcessTaskCompletion { task_id, mcp_client, respond_to } => {
+                    let result = Self::handle_process_task_completion(
+                        &project,
+                        task_id,
+                        mcp_client,
+                        &event_broadcaster
+                    ).await;
+                    let _ = respond_to.send(result);
                 }
 
                 ProjectCommand::Shutdown => {
@@ -731,6 +763,118 @@ impl ProjectManager {
             completion_percentage,
             unsynced_items,
         }
+    }
+
+    /// Handle task execution with MCP integration
+    async fn handle_execute_task_with_mcp(
+        project: &Arc<RwLock<Project>>,
+        task_id: Uuid,
+        mcp_client: crate::managers::McpClient,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) -> Result<()> {
+        let (task_title, task_description, tech_stack) = {
+            let project_guard = project.read().await;
+            let task = project_guard.get_task(task_id)
+                .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
+
+            (task.title.clone(), task.description.clone(), project_guard.tech_stack.clone())
+        };
+
+        // Emit start event
+        let _ = event_broadcaster.send(ProjectEvent::McpTaskExecutionStarted {
+            task_id,
+            task_title: task_title.clone(),
+        });
+
+        // Execute feature development with MCP
+        let _ = event_broadcaster.send(ProjectEvent::McpFeatureDevelopmentStarted { task_id });
+
+        let result = mcp_client.feature_development(
+            task_description.clone(),
+            "Current project codebase context".to_string(), // TODO: Get actual codebase context
+            format!("{:?}", tech_stack),
+            vec![], // TODO: Get existing files
+            task_description,
+            vec!["Task completion criteria".to_string()], // TODO: Get actual acceptance criteria
+            crate::managers::McpModel::Gemini,
+        ).await;
+
+        match result {
+            Ok(response) => {
+                let _ = event_broadcaster.send(ProjectEvent::McpFeatureDevelopmentCompleted {
+                    task_id,
+                    actions_count: response.actions.len(),
+                });
+
+                // Execute the actions returned by MCP
+                for action in response.actions {
+                    if let Err(e) = action.execute().await {
+                        eprintln!("Failed to execute action: {}", e);
+                    }
+                }
+
+                // Update task status to completed
+                {
+                    let mut project_guard = project.write().await;
+                    if let Some(task) = project_guard.get_task_mut(task_id) {
+                        if let Err(e) = task.transition_task_status(TaskStatus::Completed) {
+                            eprintln!("Failed to update task status: {}", e);
+                        }
+                    }
+                }
+
+                let _ = event_broadcaster.send(ProjectEvent::McpTaskExecutionCompleted {
+                    task_id,
+                    success: true,
+                });
+
+                Ok(())
+            }
+            Err(e) => {
+                let _ = event_broadcaster.send(ProjectEvent::McpTaskExecutionCompleted {
+                    task_id,
+                    success: false,
+                });
+                Err(e)
+            }
+        }
+    }
+
+    /// Handle task completion processing with MCP
+    async fn handle_process_task_completion(
+        project: &Arc<RwLock<Project>>,
+        task_id: Uuid,
+        mcp_client: crate::managers::McpClient,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) -> Result<()> {
+        let project_guard = project.read().await;
+        let task = project_guard.get_task(task_id)
+            .ok_or_else(|| OrchestratorError::validation("Task not found"))?;
+
+        // If task is completed, trigger next dependent tasks
+        if task.status == TaskStatus::Completed {
+            // Find tasks that depend on this completed task
+            let dependent_tasks: Vec<Uuid> = project_guard.tasks.iter()
+                .filter(|t| t.depends_on.contains(&task_id) && t.status == TaskStatus::Pending)
+                .map(|t| t.id)
+                .collect();
+
+            drop(project_guard); // Release the read lock
+
+            // Start dependent tasks
+            for dependent_task_id in dependent_tasks {
+                if let Err(e) = Self::handle_execute_task_with_mcp(
+                    project,
+                    dependent_task_id,
+                    mcp_client.clone(),
+                    event_broadcaster,
+                ).await {
+                    eprintln!("Failed to execute dependent task {}: {}", dependent_task_id, e);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
