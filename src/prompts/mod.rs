@@ -149,8 +149,10 @@ You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting wit
 ⚠️ CRITICAL PATH REQUIREMENTS:
 - ALWAYS use RELATIVE paths (e.g., "src/App.vue", "package.json")
 - NEVER use absolute paths (e.g., "/home/user/project/src/App.vue")
+- NEVER include app directory in path (e.g., "login-app/src/App.vue" ❌)
 - Files will be created in the project directory automatically
 - Example: "path": "src/components/Login.vue" ✅
+- Example: "path": "login-frontend-app/src/App.vue" ❌
 - Example: "path": "/absolute/path/file.vue" ❌
 
 DO NOT WRITE:

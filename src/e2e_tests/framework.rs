@@ -827,13 +827,20 @@ impl E2ETestRunner {
 
         match action {
             Action::Write { path, content } => {
-                // Clean path - remove absolute path prefixes that shouldn't be there
+                // Clean path - remove absolute path prefixes and redundant app directory prefixes
                 let clean_path = if path.starts_with("/home/") || path.starts_with("/Users/") {
                     // Extract just the filename or relative part
                     if let Some(src_pos) = path.find("src/") {
                         &path[src_pos..]
                     } else if let Some(file_name) = Path::new(path).file_name() {
                         file_name.to_str().unwrap_or(path)
+                    } else {
+                        path
+                    }
+                } else if path.contains("-app/") {
+                    // Handle cases like "login-frontend-app/src/router/index.ts" -> "src/router/index.ts"
+                    if let Some(app_pos) = path.find("-app/") {
+                        &path[app_pos + 5..] // Skip past "-app/"
                     } else {
                         path
                     }
