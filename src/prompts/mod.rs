@@ -113,12 +113,14 @@ CURRENT CODEBASE:
 {}
 
 🔧 YOUR DEVELOPMENT WORKFLOW:
-1. Break the objective into 8-12 small, dependent todos
-2. Work on ONE todo at a time
-3. After each todo, verify build/dev works (fix errors if any)
-4. After each todo, verify tests pass (fix failing tests)
-5. Only proceed to next todo when everything works
-6. If errors occur, create actions to fix them immediately
+1. If this is your first iteration: Break the objective into 8-12 small, dependent todos
+2. If continuing work: Look at existing code and continue with remaining todos
+3. Work on ONE todo at a time, but COMPLETE ALL TODOS before finishing
+4. After each todo, verify build/dev works (fix errors if any)
+5. After each todo, verify tests pass (fix failing tests)
+6. Only proceed to next todo when current todo works completely
+7. If errors occur, create actions to fix them immediately
+8. ⚠️ CRITICAL: Complete ALL your todos - don't stop after just one!
 
 ⚠️ CRITICAL: FOR DEVELOPMENT SERVER COMMANDS:
 - NEVER run blocking commands like `npm run dev`, `cargo run`, `python manage.py runserver`

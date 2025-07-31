@@ -93,7 +93,7 @@ impl E2ETestRunner {
         let mut project_files = self.read_project_files(app_dir).await?;
 
         let objective = match app_type {
-            "frontend" => "Implement a complete Vue.js login page with form validation, authentication integration, and responsive design",
+            "frontend" => "Implement a complete Vue.js login page with: 1) HTML form with email/password fields, 2) Form validation, 3) Login button with click handler, 4) Authentication logic, 5) Responsive design with Tailwind CSS, 6) Error handling, 7) Success/loading states",
             "backend" => "Implement GraphQL server with user authentication, registration, login endpoints, and JWT token management",
             _ => return Err("Invalid app type".into()),
         };
@@ -1119,7 +1119,7 @@ impl E2ETestRunner {
                         if output.status.success() {
                             println!("✅ Frontend build test passed");
                             
-                            // Also check that key files exist and have content
+                            // Check for actual login functionality implementation
                             let app_vue_path = format!("{}/src/App.vue", app_dir);
                             let main_ts_path = format!("{}/src/main.ts", app_dir);
                             
@@ -1127,23 +1127,30 @@ impl E2ETestRunner {
                             let main_ts_exists = Path::new(&main_ts_path).exists();
                             
                             if app_vue_exists && main_ts_exists {
-                                // Check that App.vue has meaningful content
+                                // Check that App.vue has actual login functionality
                                 if let Ok(content) = fs::read_to_string(&app_vue_path) {
-                                    let has_meaningful_content = content.len() > 100 && 
-                                        (content.contains("<template>") || content.contains("export default"));
+                                    let has_login_form = content.contains("form") || content.contains("input") || content.contains("button");
+                                    let has_login_logic = content.contains("login") || content.contains("auth") || content.contains("password") || content.contains("email");
+                                    let has_meaningful_content = content.len() > 300; // Must be substantial
                                     
-                                    if has_meaningful_content {
-                                        println!("✅ Frontend functionality verification passed");
+                                    if has_login_form && has_login_logic && has_meaningful_content {
+                                        println!("✅ Frontend functionality verification passed - login functionality detected");
                                         return Ok(true);
                                     } else {
-                                        println!("⚠️ App.vue exists but lacks meaningful content");
+                                        println!("⚠️ App.vue exists but missing login functionality:");
+                                        println!("   - Has form elements: {}", has_login_form);
+                                        println!("   - Has login logic: {}", has_login_logic);
+                                        println!("   - Has substantial content: {} ({}chars)", has_meaningful_content, content.len());
+                                        return Ok(false);
                                     }
                                 } else {
                                     println!("⚠️ Could not read App.vue content");
+                                    return Ok(false);
                                 }
+                            } else {
+                                println!("⚠️ Required files missing: App.vue={}, main.ts={}", app_vue_exists, main_ts_exists);
+                                return Ok(false);
                             }
-                            
-                            Ok(false)
                         } else {
                             let stderr = String::from_utf8_lossy(&output.stderr);
                             let stdout = String::from_utf8_lossy(&output.stdout);
