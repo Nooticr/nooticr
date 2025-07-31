@@ -90,7 +90,7 @@ impl E2ETestRunner {
         let mut retry_count = 0;
 
         // Read existing project files
-        let project_files = self.read_project_files(app_dir).await?;
+        let mut project_files = self.read_project_files(app_dir).await?;
 
         let objective = match app_type {
             "frontend" => "Implement a complete Vue.js login page with form validation, authentication integration, and responsive design",
@@ -122,21 +122,9 @@ impl E2ETestRunner {
             let (executed_actions, execution_errors) = self.execute_actions_with_validation(app_dir, &actions).await?;
             actions_executed.extend(executed_actions);
 
-            // Test if the application functionality actually works
-            let functionality_test_result = self.test_application_functionality(app_dir, app_type).await?;
-
-            if execution_errors.is_empty() && functionality_test_result {
-                // Success - both execution and functionality work
-                println!("✅ Feature Development: Implementation successful and functionality verified");
-                break;
-            } else {
-                // Handle errors with error recovery
+            if !execution_errors.is_empty() {
+                // Handle execution errors first
                 errors.extend(execution_errors.clone());
-                
-                if !functionality_test_result {
-                    errors.push("Application functionality verification failed".to_string());
-                }
-                
                 retry_count += 1;
 
                 if retry_count >= self.config.max_retries {
@@ -150,24 +138,61 @@ impl E2ETestRunner {
                     });
                 }
 
-                // Use error recovery prompt
-                let mut error_output = execution_errors.join("\n");
-                if !functionality_test_result {
-                    error_output.push_str("\nApplication functionality test failed - the implemented features may not be working correctly.");
-                }
+                println!("⚠️ Execution errors occurred, retrying with error recovery...");
+                let error_output = execution_errors.join("\n");
                 
+                // Re-read project files for error recovery context
+                let current_files = self.read_project_files(app_dir).await?;
                 let recovery_actions = self.run_error_recovery(app_dir, &error_output, tech_stack).await?;
                 actions_executed.extend(recovery_actions);
 
-                // Re-read project files for next iteration
-                let updated_files = self.read_project_files(app_dir).await?;
-                if updated_files.len() > project_files.len() {
-                    // Progress made, continue
-                    continue;
-                } else {
-                    // No progress, try different approach
-                    println!("⚠️  No progress made, trying alternative approach...");
+                // Update project files for next iteration
+                project_files = current_files;
+                continue;
+            }
+
+            // Test if the application functionality actually works
+            let functionality_test_result = self.test_application_functionality(app_dir, app_type).await?;
+
+            if functionality_test_result {
+                // Success - both execution and functionality work
+                println!("✅ Feature Development: Implementation successful and functionality verified");
+                break;
+            } else {
+                // Handle functionality test failure
+                retry_count += 1;
+                
+                // Get the actual build error details
+                let build_error = self.get_last_build_error(app_dir, app_type).await.unwrap_or_else(|| 
+                    "Application functionality verification failed - build/compilation errors or missing functionality detected".to_string()
+                );
+                
+                println!("⚠️ Build error details: {}", build_error);
+                errors.push(build_error.clone());
+
+                if retry_count >= self.config.max_retries {
+                    return Ok(StageResult {
+                        stage_name: "Feature Development".to_string(),
+                        success: false,
+                        actions_executed,
+                        errors,
+                        duration_ms: start_time.elapsed().as_millis(),
+                        retry_count,
+                    });
                 }
+
+                println!("⚠️ Functionality test failed, retrying with build error context...");
+                
+                // Re-read current project files to get latest state
+                let current_files = self.read_project_files(app_dir).await?;
+                
+                // Use error recovery with the actual build error
+                let recovery_actions = self.run_error_recovery(app_dir, &build_error, tech_stack).await?;
+                actions_executed.extend(recovery_actions);
+
+                // Update project files for next iteration
+                project_files = current_files;
+                continue;
             }
         }
 
@@ -774,7 +799,7 @@ impl E2ETestRunner {
         let mut errors = Vec::new();
 
         for action in actions {
-            match action.execute().await {
+            match self.execute_action_with_context(action, app_dir).await {
                 Ok(_) => {
                     executed_actions.push(serde_json::to_value(action)?);
 
@@ -790,6 +815,145 @@ impl E2ETestRunner {
         }
 
         Ok((executed_actions, errors))
+    }
+
+    /// Execute an action within the context of the app directory
+    async fn execute_action_with_context(&self, action: &Action, app_dir: &str) -> Result<(), std::io::Error> {
+        use crate::enums::action::Action;
+        use std::path::Path;
+        use tokio::fs;
+        use tokio::io::AsyncWriteExt;
+        use tokio::process::Command;
+
+        match action {
+            Action::Write { path, content } => {
+                // Clean path - remove absolute path prefixes that shouldn't be there
+                let clean_path = if path.starts_with("/home/") || path.starts_with("/Users/") {
+                    // Extract just the filename or relative part
+                    if let Some(src_pos) = path.find("src/") {
+                        &path[src_pos..]
+                    } else if let Some(file_name) = Path::new(path).file_name() {
+                        file_name.to_str().unwrap_or(path)
+                    } else {
+                        path
+                    }
+                } else {
+                    path
+                };
+                
+                // Resolve path relative to app_dir
+                let resolved_path = if Path::new(clean_path).is_absolute() {
+                    clean_path.to_string()
+                } else {
+                    format!("{}/{}", app_dir, clean_path)
+                };
+                
+                println!("📝 Writing file: {}", resolved_path);
+                let file_path = Path::new(&resolved_path);
+
+                // Create parent directories if they don't exist
+                if let Some(parent) = file_path.parent() {
+                    fs::create_dir_all(parent).await?;
+                }
+
+                let mut file = fs::File::create(&file_path).await?;
+                file.write_all(content.as_bytes()).await?;
+                file.flush().await?;
+            }
+
+            Action::Update { path, content } => {
+                // Resolve path relative to app_dir
+                let resolved_path = if Path::new(path).is_absolute() {
+                    path.clone()
+                } else {
+                    format!("{}/{}", app_dir, path)
+                };
+                
+                println!("📄 Updating file: {}", resolved_path);
+                let file_path = Path::new(&resolved_path);
+
+                // Create parent directories if they don't exist
+                if let Some(parent) = file_path.parent() {
+                    fs::create_dir_all(parent).await?;
+                }
+
+                let mut file = fs::File::create(&file_path).await?;
+                file.write_all(content.as_bytes()).await?;
+                file.flush().await?;
+            }
+
+            Action::Replace { path, old_content, new_content } => {
+                // Resolve path relative to app_dir
+                let resolved_path = if Path::new(path).is_absolute() {
+                    path.clone()
+                } else {
+                    format!("{}/{}", app_dir, path)
+                };
+                
+                println!("🔄 Replacing content in file: {}", resolved_path);
+                let file_path = Path::new(&resolved_path);
+
+                if file_path.exists() {
+                    let current_content = fs::read_to_string(&file_path).await?;
+                    let updated_content = current_content.replace(old_content, new_content);
+                    
+                    let mut file = fs::File::create(&file_path).await?;
+                    file.write_all(updated_content.as_bytes()).await?;
+                    file.flush().await?;
+                } else {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("File not found: {}", resolved_path)
+                    ));
+                }
+            }
+
+            Action::RunCommand { command, env } => {
+                println!("🚀 Running command in {}: {}", app_dir, command);
+                
+                // Check if command is potentially blocking and modify it
+                let safe_command = if command.contains("npm run dev") || 
+                                    command.contains("cargo run") ||
+                                    command.contains("python manage.py runserver") ||
+                                    command.contains("flask run") ||
+                                    command.contains("rails server") {
+                    // Add timeout to blocking commands
+                    format!("timeout 10s {}", command)
+                } else {
+                    command.clone()
+                };
+                
+                let mut cmd = Command::new("sh");
+                cmd.arg("-c").arg(&safe_command);
+                cmd.current_dir(app_dir);
+                
+                if let Some(env_vars) = env {
+                    for (key, value) in env_vars {
+                        cmd.env(key, value);
+                    }
+                }
+                
+                let output = cmd.output().await?;
+                
+                // For timeout commands, exit code 124 is expected (timeout reached)
+                if !output.status.success() && output.status.code() != Some(124) {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Command failed: {}", stderr)
+                    ));
+                } else if output.status.code() == Some(124) {
+                    println!("⏱️  Command timed out after 10s (this is expected for dev servers)");
+                }
+            }
+
+            _ => {
+                // For other actions, fallback to default execution
+                action.execute().await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Validate action result
@@ -982,7 +1146,10 @@ impl E2ETestRunner {
                             Ok(false)
                         } else {
                             let stderr = String::from_utf8_lossy(&output.stderr);
-                            println!("⚠️ Frontend build test failed: {}", stderr);
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            println!("⚠️ Frontend build test failed:");
+                            println!("STDOUT: {}", stdout);
+                            println!("STDERR: {}", stderr);
                             Ok(false)
                         }
                     }
@@ -1038,6 +1205,39 @@ impl E2ETestRunner {
     async fn test_performance(&self, _app_dir: &str, _app_type: &str) -> Result<bool, Box<dyn std::error::Error>> {
         // For now, just return true - in a real implementation, this would run performance tests
         Ok(true)
+    }
+
+    /// Get the last build error by running the build command and capturing its output
+    async fn get_last_build_error(&self, app_dir: &str, app_type: &str) -> Option<String> {
+        use tokio::process::Command;
+        
+        let build_command = match app_type {
+            "frontend" => "npm run build",
+            "backend" => "cargo check",
+            _ => return None,
+        };
+
+        let build_result = Command::new("sh")
+            .arg("-c")
+            .arg(format!("cd {} && {}", app_dir, build_command))
+            .output()
+            .await;
+
+        match build_result {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    Some(format!("Build command '{}' failed:\nSTDOUT:\n{}\nSTDERR:\n{}", 
+                        build_command, stdout, stderr))
+                } else {
+                    None
+                }
+            }
+            Err(e) => {
+                Some(format!("Could not run build command '{}': {}", build_command, e))
+            }
+        }
     }
 
     /// Generate comprehensive test report

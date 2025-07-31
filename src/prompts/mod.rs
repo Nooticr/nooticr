@@ -115,10 +115,19 @@ CURRENT CODEBASE:
 🔧 YOUR DEVELOPMENT WORKFLOW:
 1. Break the objective into 8-12 small, dependent todos
 2. Work on ONE todo at a time
-3. After each todo, verify `npm run dev` works (fix errors if any)
+3. After each todo, verify build/dev works (fix errors if any)
 4. After each todo, verify tests pass (fix failing tests)
 5. Only proceed to next todo when everything works
 6. If errors occur, create actions to fix them immediately
+
+⚠️ CRITICAL: FOR DEVELOPMENT SERVER COMMANDS:
+- NEVER run blocking commands like `npm run dev`, `cargo run`, `python manage.py runserver`
+- ALWAYS use non-blocking alternatives:
+  - Frontend: Use `npm run build` to verify, not `npm run dev`
+  - Rust: Use `cargo check` or `cargo build` instead of `cargo run`
+  - Python: Use syntax checks instead of running servers
+  - Node.js: Use `node --check` for validation
+- If you must test a server, use: `timeout 10s npm run dev` or background it with `npm run dev > dev.log 2>&1 &`
 
 📋 DEVELOPMENT RULES:
 - Focus on making things WORK, not perfect code
@@ -135,14 +144,22 @@ CURRENT CODEBASE:
 
 You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
 
+⚠️ CRITICAL PATH REQUIREMENTS:
+- ALWAYS use RELATIVE paths (e.g., "src/App.vue", "package.json")
+- NEVER use absolute paths (e.g., "/home/user/project/src/App.vue")
+- Files will be created in the project directory automatically
+- Example: "path": "src/components/Login.vue" ✅
+- Example: "path": "/absolute/path/file.vue" ❌
+
 DO NOT WRITE:
 ❌ "I'll start by creating..."
 ❌ "Here are the actions..."
 ❌ "First, I need to..."
 ❌ Any explanatory text
+❌ Absolute file paths
 
 WRITE ONLY:
-✅ [{{ "Write": {{ "path": "...", "content": "..." }} }}]
+✅ [{{ "Write": {{ "path": "src/App.vue", "content": "..." }} }}]
 
 {}
             "#,
@@ -1900,12 +1917,20 @@ FAILED COMMAND: {}
 - Peer dependency issues
 - Lock file inconsistencies
 
-💻 TECH STACK SPECIFIC COMMANDS:
-- **JavaScript/Node.js**: `npm run dev`, `npm run build`, `npm test`
+💻 TECH STACK SPECIFIC COMMANDS (NON-BLOCKING):
+- **JavaScript/Node.js**: `npm run build`, `npm test`, `node --check file.js`
 - **TypeScript**: `tsc`, `npm run type-check`
-- **Vue.js**: `npm run dev`, `npm run build`
-- **React**: `npm start`, `npm run build`
-- **Rust**: `cargo run`, `cargo build`, `cargo test`
+- **Vue.js**: `npm run build`, `npm run type-check`
+- **React**: `npm run build`, `npm test`
+- **Rust**: `cargo check`, `cargo build`, `cargo test`
+- **Python**: `python -m py_compile`, `python -m pytest`
+
+⚠️ AVOID BLOCKING COMMANDS:
+- ❌ `npm run dev` (blocks terminal)
+- ❌ `cargo run` (runs server, blocks)
+- ❌ `python manage.py runserver` (blocks)
+- ❌ `flask run` (blocks)
+- ✅ Use build/check commands instead
 
 🔧 ERROR FIXING RULES:
 - Focus on fixing the immediate error first

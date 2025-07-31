@@ -91,12 +91,21 @@ YOUR RESPONSE MUST:
 ✅ Contain ONLY valid JSON array of actions
 ✅ Use proper JSON escaping: \\n for newlines, \\" for quotes, \\\\ for backslashes
 ✅ Have all braces and brackets properly matched
+✅ ALWAYS use RELATIVE paths only (e.g., "src/App.vue", NOT "/home/user/src/App.vue")
 
 ❌ NEVER include text like:
 ❌ "Here are the actions to complete this task:"
 ❌ "The following JSON actions will..."  
 ❌ "I'll create these files:"
 ❌ "Summary: The above actions will..."
+❌ Absolute file paths starting with "/" or containing system paths
+
+🗂️ PATH REQUIREMENTS:
+✅ "path": "src/App.vue" (CORRECT - relative path)
+✅ "path": "package.json" (CORRECT - relative path)  
+✅ "path": "public/index.html" (CORRECT - relative path)
+❌ "path": "/home/user/project/src/App.vue" (WRONG - absolute path)
+❌ "path": "/absolute/path/file.js" (WRONG - absolute path)
 
 EXAMPLE CORRECT FORMAT:
 [
@@ -291,7 +300,7 @@ EXAMPLE CORRECT FORMAT:
 
     /// FeatureDev specific action examples
     pub fn feature_dev_action_examples() -> &'static str {
-        r#"FEATURE DEV ACTION EXAMPLES:
+        r#"FEATURE DEV ACTION EXAMPLES (ALWAYS USE RELATIVE PATHS):
             [
                 {
                     "Write": {
@@ -300,8 +309,14 @@ EXAMPLE CORRECT FORMAT:
                     }
                 },
                 {
+                    "Write": {
+                        "path": "vite.config.ts",
+                        "content": "import { defineConfig } from 'vite'\nimport vue from '@vitejs/plugin-vue'\n\nexport default defineConfig({\n  plugins: [vue()]\n})"
+                    }
+                },
+                {
                     "RunCommand": {
-                        "command": "npm run dev",
+                        "command": "npm run build",
                         "env": []
                     }
                 },
@@ -311,7 +326,14 @@ EXAMPLE CORRECT FORMAT:
                         "env": []
                     }
                 }
-            ]"#
+            ]
+
+            ⚠️ PATH & COMMAND GUIDELINES:
+            - ALWAYS use relative paths: "src/App.vue" NOT "/home/user/src/App.vue"  
+            - Use `npm run build` NOT `npm run dev` (dev servers block)
+            - Use `cargo check` NOT `cargo run` (servers block)
+            - Use `python -m py_compile` NOT `python manage.py runserver`
+            - If testing servers, use: `timeout 10s command` or `command > log 2>&1 &`"#
     }
 
     /// QA specific action examples
