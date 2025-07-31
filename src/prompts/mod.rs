@@ -291,46 +291,11 @@ impl Prompts {
         acceptance_criteria: &[String],
         codebase_context: &str,
     ) -> String {
-        let files_section = if existing_files.is_empty() {
-            "No existing files in the project yet.".to_string()
-        } else {
-            existing_files
-                .iter()
-                .map(|(file_path, content)| {
-                    let preview = if content.len() > 500 {
-                        format!("{}...\n[Content truncated - {} total characters]", 
-                               &content[..500], content.len())
-                    } else {
-                        content.clone()
-                    };
-                    format!("FILE: {}\n```\n{}\n```", file_path, preview)
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        };
+        let files_section = crate::prompts::common::PromptBuilder::format_files_section(existing_files, Some(500));
 
-        let criteria_section = if acceptance_criteria.is_empty() {
-            "No specific acceptance criteria provided.".to_string()
-        } else {
-            acceptance_criteria
-                .iter()
-                .enumerate()
-                .map(|(i, criteria)| format!("{}. {}", i + 1, criteria))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
+        let criteria_section = crate::prompts::common::PromptBuilder::format_acceptance_criteria(acceptance_criteria);
 
-        let dependencies_section = if completed_dependencies.is_empty() {
-            "No dependencies - this is a foundational task.".to_string()
-        } else {
-            format!("This task builds upon the following completed tasks:\n{}",
-                    completed_dependencies
-                        .iter()
-                        .enumerate()
-                        .map(|(i, dep)| format!("{}. {}", i + 1, dep))
-                        .collect::<Vec<_>>()
-                        .join("\n"))
-        };
+        let dependencies_section = crate::prompts::common::PromptBuilder::format_dependencies_section(completed_dependencies);
 
         let tags_section = task_tags.join(", ");
 
@@ -608,21 +573,9 @@ impl Prompts {
                 }}
             ]
 
-            CRITICAL JSON FORMATTING REQUIREMENTS:
-            - Return ONLY a valid JSON array of actions, no other text
-            - Escape all special characters in strings (quotes, backslashes, newlines)
-            - Use \\n for newlines, \\" for quotes, \\\\ for backslashes in content
-            - Ensure all braces and brackets are properly matched
-            - Do not include any comments or explanations outside the JSON
-            - Validate that your JSON can be parsed by standard JSON parsers
+            {}
 
-            IMPORTANT GUIDELINES:
-            - Provide COMPLETE, working code - not placeholders or comments like "// TODO"
-            - Each file should compile/run successfully after creation
-            - Include all necessary imports, types, and dependencies
-            - Follow the existing project structure and conventions
-            - Make the implementation specific to the task requirements
-            - Ensure proper error handling and edge case coverage
+            {}
             - Test that your actions would create a functional implementation
             - Double-check that all JSON is properly escaped and valid
 
@@ -637,7 +590,9 @@ impl Prompts {
             dependencies_section,
             criteria_section,
             codebase_context,
-            files_section
+            files_section,
+            crate::prompts::common::PromptBuilder::json_formatting_requirements(),
+            crate::prompts::common::PromptBuilder::implementation_guidelines()
         )
     }
 
@@ -647,11 +602,7 @@ impl Prompts {
         context: &str,
         pull_request_id: &str
     ) -> String {
-        let files_section = files_and_code
-            .iter()
-            .map(|(file_path, code)| format!("FILE: {}\n```\n{}\n```", file_path, code))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let files_section = crate::prompts::common::PromptBuilder::format_files_section(files_and_code, None);
 
         format!(
             r#"Review this code implementation against the requirements:
@@ -1289,11 +1240,7 @@ impl Prompts {
         api_documentation: &str,
         tech_stack: &str,
     ) -> String {
-        let frontend_files_section = frontend_code
-            .iter()
-            .map(|(file_path, content)| format!("FILE: {}\n```\n{}\n```", file_path, content))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let frontend_files_section = crate::prompts::common::PromptBuilder::format_files_section(frontend_code, None);
 
         format!(
             r#"Synchronize API calls between backend and frontend with comprehensive analysis:
@@ -1461,18 +1408,9 @@ impl Prompts {
         bottlenecks: &[String],
         tech_stack: &str,
     ) -> String {
-        let files_section = application_code
-            .iter()
-            .map(|(file_path, content)| format!("FILE: {}\n```\n{}\n```", file_path, content))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let files_section = crate::prompts::common::PromptBuilder::format_files_section(application_code, None);
 
-        let bottlenecks_section = bottlenecks
-            .iter()
-            .enumerate()
-            .map(|(i, bottleneck)| format!("{}. {}", i + 1, bottleneck))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let bottlenecks_section = crate::prompts::common::PromptBuilder::format_bottlenecks_section(bottlenecks);
 
         format!(
             r#"Optimize application performance with comprehensive analysis and solutions:

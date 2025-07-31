@@ -26,7 +26,7 @@ impl ManagerHelpers {
     /// Execute an operation with timing and statistics tracking
     pub async fn execute_with_timing<T, F, Fut>(
         operation: F,
-        operation_name: &str,
+        _operation_name: &str,
         update_stats: impl FnOnce(u64, bool),
     ) -> Result<T>
     where

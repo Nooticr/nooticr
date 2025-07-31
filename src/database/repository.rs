@@ -26,47 +26,49 @@ impl ProjectRepository {
 
     /// Save a complete project to the database
     pub fn save_project(&self, project: &Project) -> Result<()> {
-        let conn = self.db.get_connection();
-        let conn = conn.lock()
-            .map_err(|e| OrchestratorError::database(format!("Failed to acquire database lock: {}", e)))?;
+        use crate::database::helpers::DatabaseHelpers;
 
-        // Start transaction
-        let tx = conn.unchecked_transaction()
-            .map_err(|e| OrchestratorError::database(format!("Failed to start transaction: {}", e)))?;
+        DatabaseHelpers::with_transaction(&self.db.get_connection(), |tx| {
+            // Save project
+            self.save_project_data(tx, project)?;
 
-        // Save project
-        self.save_project_data(&tx, project)?;
+            // Save related entities using batch operations
+            DatabaseHelpers::save_collection(
+                tx,
+                &project.agents,
+                |conn, agent| self.save_agent_data(conn, agent, &project.id),
+                "agents"
+            )?;
 
-        // Save agents
-        for agent in &project.agents {
-            self.save_agent_data(&tx, agent, &project.id)?;
-        }
+            DatabaseHelpers::save_collection(
+                tx,
+                &project.tasks,
+                |conn, task| self.save_task_data(conn, task, &project.id),
+                "tasks"
+            )?;
 
-        // Save tasks
-        for task in &project.tasks {
-            self.save_task_data(&tx, task, &project.id)?;
-        }
+            DatabaseHelpers::save_collection(
+                tx,
+                &project.issues,
+                |conn, issue| self.save_issue_data(conn, issue, &project.id),
+                "issues"
+            )?;
 
-        // Save issues
-        for issue in &project.issues {
-            self.save_issue_data(&tx, issue, &project.id)?;
-        }
+            // Save project dependencies
+            if let Some(deps) = &project.dependencies_urls {
+                self.save_project_dependencies(tx, &project.id, deps)?;
+            }
 
-        // Save project dependencies
-        if let Some(deps) = &project.dependencies_urls {
-            self.save_project_dependencies(&tx, &project.id, deps)?;
-        }
+            // Save tasks history
+            DatabaseHelpers::save_collection(
+                tx,
+                &project.tasks_history,
+                |conn, (task, timestamp)| self.save_task_history(conn, &project.id, task, timestamp),
+                "tasks history"
+            )?;
 
-        // Save tasks history
-        for (task, timestamp) in &project.tasks_history {
-            self.save_task_history(&tx, &project.id, task, timestamp)?;
-        }
-
-        // Commit transaction
-        tx.commit()
-            .map_err(|e| OrchestratorError::database(format!("Failed to commit transaction: {}", e)))?;
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Load a complete project from the database
@@ -78,19 +80,11 @@ impl ProjectRepository {
         // Load project
         let mut project = self.load_project_data(&conn, project_path)?;
 
-        // Load agents
+        // Load related entities
         project.agents = self.load_agents(&conn, &project.id)?;
-
-        // Load tasks
         project.tasks = self.load_tasks(&conn, &project.id)?;
-
-        // Load issues
         project.issues = self.load_issues(&conn, &project.id)?;
-
-        // Load project dependencies
         project.dependencies_urls = self.load_project_dependencies(&conn, &project.id)?;
-
-        // Load tasks history
         project.tasks_history = self.load_tasks_history(&conn, &project.id)?;
 
         Ok(project)
@@ -118,7 +112,7 @@ impl ProjectRepository {
             .map_err(|e| OrchestratorError::database(format!("Failed to acquire database lock: {}", e)))?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, idea, name, repository_url, project_path, status, tech_stack, created_at, updated_at 
+            "SELECT id, idea, name, repository_url, project_path, status, tech_stack, created_at, updated_at
              FROM projects ORDER BY created_at DESC"
         ).map_err(|e| OrchestratorError::database(format!("Failed to prepare statement: {}", e)))?;
 
@@ -130,7 +124,7 @@ impl ProjectRepository {
         for project_result in project_iter {
             let db_project = project_result
                 .map_err(|e| OrchestratorError::database(format!("Failed to parse project row: {}", e)))?;
-            
+
             let project = db_project.to_project()?;
             projects.push((project.project_path.clone(), project));
         }
@@ -156,41 +150,42 @@ impl ProjectRepository {
 
     /// Save project data to database
     fn save_project_data(&self, conn: &Connection, project: &Project) -> Result<()> {
+        use crate::database::helpers::DatabaseHelpers;
+
         let db_project = DbProject::from_project(project);
 
-        conn.execute(
-            "INSERT OR REPLACE INTO projects 
+        DatabaseHelpers::insert_or_replace(
+            conn,
+            "INSERT OR REPLACE INTO projects
              (id, idea, name, repository_url, project_path, status, tech_stack, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                db_project.id,
-                db_project.idea,
-                db_project.name,
-                db_project.repository_url,
-                db_project.project_path,
-                db_project.status,
-                db_project.tech_stack,
-                db_project.created_at,
-                db_project.updated_at
-            ]
-        ).map_err(|e| OrchestratorError::database(format!("Failed to save project: {}", e)))?;
-
-        Ok(())
+            &[
+                &db_project.id,
+                &db_project.idea,
+                &db_project.name,
+                &db_project.repository_url,
+                &db_project.project_path,
+                &db_project.status,
+                &db_project.tech_stack,
+                &db_project.created_at,
+                &db_project.updated_at
+            ],
+            "save project"
+        )
     }
 
     /// Load project data from database
     fn load_project_data(&self, conn: &Connection, project_path: &str) -> Result<Project> {
-        let db_project = conn.query_row(
-            "SELECT id, idea, name, repository_url, project_path, status, tech_stack, created_at, updated_at 
+        use crate::database::helpers::DatabaseHelpers;
+
+        let db_project = DatabaseHelpers::query_single_row(
+            conn,
+            "SELECT id, idea, name, repository_url, project_path, status, tech_stack, created_at, updated_at
              FROM projects WHERE project_path = ?1",
-            params![project_path],
-            |row| DbProject::from_row(row)
-        ).map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                OrchestratorError::validation(format!("Project not found at path: {}", project_path))
-            }
-            _ => OrchestratorError::database(format!("Failed to load project: {}", e))
-        })?;
+            &[&project_path],
+            |row| DbProject::from_row(row),
+            &format!("project at path: {}", project_path)
+        )?;
 
         db_project.to_project()
     }
