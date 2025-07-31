@@ -24,6 +24,7 @@ fn parse_tech_stack(tech_stack_str: &str) -> Result<TechStack, Box<dyn std::erro
 }
 
 /// Collect existing files in the project directory for context
+#[allow(dead_code)]
 async fn collect_existing_files(project_path: &PathBuf) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     debug!("📂 Collecting existing files from: {:?}", project_path);
     let mut files = Vec::new();

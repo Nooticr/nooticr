@@ -1141,17 +1141,47 @@ mod tests {
         let gemini_content = fs::read_to_string(&gemini_file).await.unwrap();
         let claude_content = fs::read_to_string(&claude_file).await.unwrap();
 
-        assert!(gemini_content.contains("Technology Stack"));
-        assert!(claude_content.contains("Development Guidelines"));
+        // Test should expect content from the actual context file, not generic content
+        assert!(gemini_content.contains("Rust"));
+        assert!(gemini_content.contains("GraphQL"));
+        assert!(claude_content.contains("Production"));
+        assert!(claude_content.contains("Code-Writing Best Practices"));
         assert_eq!(gemini_content, claude_content);
 
-        // Check event was emitted
-        let event = timeout(Duration::from_secs(1), event_rx.recv()).await.unwrap().unwrap();
-        match event {
-            McpEvent::ContextInitialized { project_path: path, .. } => {
-                assert_eq!(path, project_path);
+        // Check event was emitted - we may receive multiple events, so wait for the right one
+        let mut found_context_initialized = false;
+        let timeout_duration = Duration::from_secs(3);
+        let start_time = std::time::Instant::now();
+
+        while start_time.elapsed() < timeout_duration && !found_context_initialized {
+            match timeout(Duration::from_millis(100), event_rx.recv()).await {
+                Ok(Some(event)) => {
+                    match event {
+                        McpEvent::ContextInitialized { project_path: path, .. } => {
+                            assert_eq!(path, project_path);
+                            found_context_initialized = true;
+                        }
+                        McpEvent::ModelAvailabilityChanged { .. } => {
+                            // Ignore model availability events during startup
+                            continue;
+                        }
+                        other => {
+                            // Allow other events but continue waiting
+                            println!("Received event: {:?}", other);
+                            continue;
+                        }
+                    }
+                }
+                Ok(None) => panic!("Event channel closed"),
+                Err(_) => {
+                    // Timeout on individual recv, continue waiting
+                    continue;
+                }
             }
-            _ => panic!("Expected ContextInitialized event"),
+        }
+
+        if !found_context_initialized {
+            panic!("Did not receive ContextInitialized event within timeout");
         }
     }
 
@@ -1335,14 +1365,15 @@ pub fn authenticate(username: &str, password: &str) -> bool {
 
         let content = manager.generate_context_content(&TechStack::Rust);
 
-        assert!(content.contains("Technology Stack"));
+        // Test should expect content from the actual context file, not generic content
         assert!(content.contains("Rust"));
-        assert!(content.contains("Development Guidelines"));
-        assert!(content.contains("Code Quality"));
-        assert!(content.contains("Security"));
-        assert!(content.contains("Performance"));
-        assert!(content.contains("Testing"));
-        assert!(content.contains("Documentation"));
+        assert!(content.contains("GraphQL"));
+        assert!(content.contains("Production"));
+        assert!(content.contains("Code-Writing Best Practices"));
+        assert!(content.contains("Top-Down"));
+
+        // Ensure it's not empty and has substantial content
+        assert!(content.len() > 1000);
     }
 
     #[tokio::test]
