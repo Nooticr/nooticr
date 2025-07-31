@@ -16,6 +16,8 @@ static INIT: Once = Once::new();
 
 fn init_tracing() {
     INIT.call_once(|| {
+        // Load environment variables from .env file
+        dotenv::dotenv().ok();
         tracing_subscriber::fmt::init();
     });
 }
@@ -236,14 +238,17 @@ async fn test_vue_app_startup_verification() {
             let syntax_ok = test_vue_syntax_check(&project_path).await;
             debug!("📝 Vue syntax check: {}", syntax_ok);
             
-            // Verify project files exist
-            let orchy_config = project_path.join("orchy.json");
-            let config_exists = orchy_config.exists();
-            debug!("📄 orchy.json exists: {}", config_exists);
-            
+            // Verify project exists in database
+            let db_path = orchy::utils::cli::get_default_database_path();
+            let project_exists = orchy::utils::cli::project_exists_in_database(
+                &project_path.to_string_lossy(),
+                db_path
+            ).await.unwrap_or(false);
+            debug!("📄 Project exists in database: {}", project_exists);
+
             assert!(is_buildable, "Vue.js project should be buildable");
             assert!(syntax_ok, "Vue.js syntax should be valid");
-            assert!(config_exists, "orchy.json should exist");
+            assert!(project_exists, "Project should exist in database");
             
             debug!("🎉 Vue app startup verification PASSED");
         },
@@ -289,14 +294,17 @@ async fn test_rust_app_compilation_verification() {
             let syntax_ok = test_rust_syntax_check(&project_path).await;
             debug!("📝 Rust syntax check: {}", syntax_ok);
             
-            // Verify project files exist
-            let orchy_config = project_path.join("orchy.json");
-            let config_exists = orchy_config.exists();
-            debug!("📄 orchy.json exists: {}", config_exists);
-            
+            // Verify project exists in database
+            let db_path = orchy::utils::cli::get_default_database_path();
+            let project_exists = orchy::utils::cli::project_exists_in_database(
+                &project_path.to_string_lossy(),
+                db_path
+            ).await.unwrap_or(false);
+            debug!("📄 Project exists in database: {}", project_exists);
+
             assert!(is_compilable, "Rust project should be compilable");
             assert!(syntax_ok, "Rust syntax should be valid");
-            assert!(config_exists, "orchy.json should exist");
+            assert!(project_exists, "Project should exist in database");
             
             debug!("🎉 Rust app compilation verification PASSED");
         },
@@ -337,10 +345,16 @@ async fn test_project_files_integrity() {
             // Check that critical files exist and are not empty
             let critical_files = vec![
                 "package.json",
-                "orchy.json",
-                "src/main.js", 
+                "src/main.js",
                 "src/App.vue"
             ];
+
+            // Also check that project exists in database
+            let db_path = orchy::utils::cli::get_default_database_path();
+            let project_exists = orchy::utils::cli::project_exists_in_database(
+                &project_path.to_string_lossy(),
+                db_path
+            ).await.unwrap_or(false);
             
             let mut files_ok = true;
             for file in &critical_files {
@@ -364,6 +378,7 @@ async fn test_project_files_integrity() {
             }
             
             assert!(files_ok, "All critical files should exist and not be empty");
+            assert!(project_exists, "Project should exist in database");
             debug!("🎉 Project files integrity verification PASSED");
         },
         Ok(Err(e)) => {

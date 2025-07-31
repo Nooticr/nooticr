@@ -247,7 +247,7 @@ impl DependencyResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::task::{Task, TaskInput};
+    use crate::models::task::Task;
     use crate::enums::Priority;
     
     #[test]

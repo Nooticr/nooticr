@@ -156,26 +156,15 @@ async fn verify_fullstack_project_files(project_path: &PathBuf) -> bool {
     success
 }
 
-/// Helper function to verify project configuration
+/// Helper function to verify project configuration in database
 async fn verify_project_config(project_path: &PathBuf, expected_name: &str, expected_tech_stack: TechStack) -> bool {
-    let config_path = project_path.join("orchy.json");
-    if !config_path.exists() {
-        debug!("Project configuration file not found");
-        return false;
-    }
+    let db_path = orchy::utils::cli::get_default_database_path();
+    let project_path_str = project_path.to_string_lossy().to_string();
 
-    let config_content = match fs::read_to_string(&config_path).await {
-        Ok(content) => content,
-        Err(e) => {
-            debug!("Failed to read project config: {}", e);
-            return false;
-        }
-    };
-
-    let project: Project = match serde_json::from_str(&config_content) {
+    let project = match orchy::utils::cli::load_project_from_database(&project_path_str, db_path).await {
         Ok(project) => project,
         Err(e) => {
-            debug!("Failed to parse project config: {}", e);
+            debug!("Failed to load project from database: {}", e);
             return false;
         }
     };
@@ -228,7 +217,6 @@ async fn test_e2e_todo_app_vue_stack() {
             
             // Verify basic project structure
             let expected_files = vec![
-                "orchy.json",
                 "GEMINI.md",
                 "CLAUDE.md",
             ];
@@ -277,7 +265,6 @@ async fn test_e2e_todo_app_react_stack() {
             
             // Verify basic project structure
             let expected_files = vec![
-                "orchy.json",
                 "GEMINI.md",
                 "CLAUDE.md",
             ];
@@ -325,7 +312,6 @@ async fn test_e2e_todo_app_rust_backend() {
             
             // Verify basic project structure
             let expected_files = vec![
-                "orchy.json",
                 "GEMINI.md",
                 "CLAUDE.md",
             ];
@@ -373,7 +359,6 @@ async fn test_e2e_todo_app_fullstack_rust_vue() {
             
             // Verify basic project structure
             let expected_files = vec![
-                "orchy.json",
                 "GEMINI.md",
                 "CLAUDE.md",
             ];

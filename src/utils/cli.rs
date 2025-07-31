@@ -1,67 +1,73 @@
 use crate::models::project::Project;
+use crate::database::{Database, repository::ProjectRepository};
 use std::fs;
 use std::path::PathBuf;
 
-/// Discover all projects by looking for orchy.json files
+/// Discover all projects from database
 pub async fn discover_projects() -> Result<Vec<(String, Project)>, Box<dyn std::error::Error>> {
-    let mut projects = Vec::new();
-    
-    // Look in current directory and common project directories
-    let search_paths = vec![
-        PathBuf::from("."),
-        PathBuf::from("./projects"),
-        PathBuf::from("../"),
-        dirs::home_dir().map(|h| h.join("projects")).unwrap_or_else(|| PathBuf::from(".")),
-    ];
+    // Use default database location
+    let db_path = get_default_database_path();
 
-    for search_path in search_paths {
-        if !search_path.exists() {
-            continue;
-        }
-
-        // Look for orchy.json files recursively (up to 2 levels deep)
-        if let Ok(entries) = fs::read_dir(&search_path) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                
-                // Check if it's a directory
-                if path.is_dir() {
-                    let config_path = path.join("orchy.json");
-                    if config_path.exists() {
-                        if let Ok(content) = fs::read_to_string(&config_path) {
-                            if let Ok(project) = serde_json::from_str::<Project>(&content) {
-                                projects.push((project.name.clone(), project));
-                            }
-                        }
-                    }
-                }
-                
-                // Also check if the entry itself is an orchy.json file
-                if path.file_name().and_then(|n| n.to_str()) == Some("orchy.json") {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        if let Ok(project) = serde_json::from_str::<Project>(&content) {
-                            projects.push((project.name.clone(), project));
-                        }
-                    }
-                }
-            }
-        }
+    // If database doesn't exist, return empty list
+    if !db_path.exists() {
+        return Ok(Vec::new());
     }
 
-    // Remove duplicates based on project ID
-    projects.sort_by(|a, b| a.1.id.cmp(&b.1.id));
-    projects.dedup_by(|a, b| a.1.id == b.1.id);
+    discover_projects_from_database(db_path).await
+}
 
+/// Get the default database path
+pub fn get_default_database_path() -> PathBuf {
+    // Use a standard location for the database
+    if let Some(home_dir) = dirs::home_dir() {
+        home_dir.join(".orchy").join("orchy.db")
+    } else {
+        PathBuf::from("orchy.db")
+    }
+}
+
+/// Save project to database (default method)
+pub async fn save_project(project: &Project) -> Result<(), Box<dyn std::error::Error>> {
+    let db_path = get_default_database_path();
+
+    // Ensure the database directory exists
+    if let Some(parent) = db_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    save_project_to_database(project, db_path).await
+}
+
+/// Save project to database
+pub async fn save_project_to_database(project: &Project, db_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let database = Database::new(db_path)?;
+    let repository = ProjectRepository::new(database);
+    repository.save_project(project)?;
+    Ok(())
+}
+
+/// Load project from database
+pub async fn load_project_from_database(project_path: &str, db_path: PathBuf) -> Result<Project, Box<dyn std::error::Error>> {
+    let database = Database::new(db_path)?;
+    let repository = ProjectRepository::new(database);
+    let project = repository.load_project(project_path)?;
+    Ok(project)
+}
+
+/// Discover all projects from database
+pub async fn discover_projects_from_database(db_path: PathBuf) -> Result<Vec<(String, Project)>, Box<dyn std::error::Error>> {
+    let database = Database::new(db_path)?;
+    let repository = ProjectRepository::new(database);
+    let projects = repository.list_projects()?;
     Ok(projects)
 }
 
-/// Save project to file
-pub async fn save_project(project: &Project) -> Result<(), Box<dyn std::error::Error>> {
-    let project_path = PathBuf::from(&project.project_path);
-    let config_path = project_path.join("orchy.json");
-    let project_json = serde_json::to_string_pretty(project)?;
-    fs::write(&config_path, project_json)?;
-    Ok(())
+/// Check if a project exists in database
+pub async fn project_exists_in_database(project_path: &str, db_path: PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
+    let database = Database::new(db_path)?;
+    let repository = ProjectRepository::new(database);
+    let exists = repository.project_exists(project_path)?;
+    Ok(exists)
 }
 
 /// Format task status for display

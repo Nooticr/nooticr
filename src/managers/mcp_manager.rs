@@ -567,7 +567,7 @@ Maintain separation of concerns and modular architecture.
         Ok(parsed_response)
     }
 
-    /// Execute task-specific development prompt
+    /// Execute task-specific development prompt with retry logic
     async fn execute_task_development(
         &mut self,
         task_title: &str,
@@ -606,16 +606,84 @@ Maintain separation of concerns and modular architecture.
         debug!("   ✅ Completed dependencies: {}", completed_dependencies.len());
         debug!("   ✔️  Acceptance criteria: {}", acceptance_criteria.len());
 
-        let response = self.execute_prompt(&prompt, model.clone()).await?;
-        let parsed_response: FeatureDevelopmentResponse = self.parse_json_response(&response)?;
-
+        // Try up to 3 times with retry logic for JSON parsing failures
+        let max_retries = 3;
+        let mut last_error = None;
+        
+        for attempt in 1..=max_retries {
+            debug!("🔄 Attempt {}/{} for task development", attempt, max_retries);
+            
+            match self.execute_prompt(&prompt, model.clone()).await {
+                Ok(response) => {
+                    match self.parse_json_response::<FeatureDevelopmentResponse>(&response) {
+                        Ok(parsed_response) => {
+                            debug!("✅ Task development successful on attempt {}", attempt);
+                            debug!("   🎬 Generated {} actions", parsed_response.actions.len());
+                            let execution_time = start_time.elapsed().as_millis() as u64;
+                            self.update_statistics("task_development", model, execution_time, true);
+                            return Ok(parsed_response);
+                        }
+                        Err(parse_error) => {
+                            debug!("❌ JSON parsing failed on attempt {}: {}", attempt, parse_error);
+                            let error_message = parse_error.to_string();
+                            last_error = Some(parse_error);
+                            
+                            if attempt < max_retries {
+                                debug!("🔁 Retrying with error feedback to AI...");
+                                // Create a retry prompt with the error information
+                                let retry_prompt = format!(
+                                    "{}\n\nPREVIOUS ATTEMPT FAILED:\nError: {}\nResponse that failed: {}\n\nPlease fix the JSON format and try again. Ensure valid JSON syntax with proper escaping of quotes and commas.",
+                                    prompt,
+                                    error_message,
+                                    &response[..response.len().min(1000)]
+                                );
+                                
+                                // Use the retry prompt for next attempt
+                                match self.execute_prompt(&retry_prompt, model.clone()).await {
+                                    Ok(retry_response) => {
+                                        match self.parse_json_response::<FeatureDevelopmentResponse>(&retry_response) {
+                                            Ok(parsed_response) => {
+                                                debug!("✅ Task development successful on retry {}", attempt);
+                                                debug!("   🎬 Generated {} actions", parsed_response.actions.len());
+                                                let execution_time = start_time.elapsed().as_millis() as u64;
+                                                self.update_statistics("task_development", model, execution_time, true);
+                                                return Ok(parsed_response);
+                                            }
+                                            Err(retry_parse_error) => {
+                                                debug!("❌ Retry JSON parsing also failed: {}", retry_parse_error);
+                                                last_error = Some(retry_parse_error);
+                                            }
+                                        }
+                                    }
+                                    Err(retry_prompt_error) => {
+                                        debug!("❌ Retry prompt execution failed: {}", retry_prompt_error);
+                                        last_error = Some(retry_prompt_error);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(prompt_error) => {
+                    debug!("❌ Prompt execution failed on attempt {}: {}", attempt, prompt_error);
+                    last_error = Some(prompt_error);
+                }
+            }
+            
+            if attempt < max_retries {
+                debug!("⏳ Waiting 2 seconds before retry attempt {}...", attempt + 1);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+        
+        // All attempts failed
+        let final_error = last_error.unwrap_or_else(|| OrchestratorError::internal("Unknown error in task development"));
+        debug!("❌ All {} attempts failed for task development", max_retries);
+        
         let execution_time = start_time.elapsed().as_millis() as u64;
-        self.update_statistics("task_development", model, execution_time, true);
-
-        debug!("✅ Task development completed for: {}", task_title);
-        debug!("   🎬 Generated {} actions", parsed_response.actions.len());
-
-        Ok(parsed_response)
+        self.update_statistics("task_development", model, execution_time, false);
+        
+        Err(final_error)
     }
 
     /// Execute feature development prompt
@@ -1073,17 +1141,47 @@ mod tests {
         let gemini_content = fs::read_to_string(&gemini_file).await.unwrap();
         let claude_content = fs::read_to_string(&claude_file).await.unwrap();
 
-        assert!(gemini_content.contains("Technology Stack"));
-        assert!(claude_content.contains("Development Guidelines"));
+        // Test should expect content from the actual context file, not generic content
+        assert!(gemini_content.contains("Rust"));
+        assert!(gemini_content.contains("GraphQL"));
+        assert!(claude_content.contains("Production"));
+        assert!(claude_content.contains("Code-Writing Best Practices"));
         assert_eq!(gemini_content, claude_content);
 
-        // Check event was emitted
-        let event = timeout(Duration::from_secs(1), event_rx.recv()).await.unwrap().unwrap();
-        match event {
-            McpEvent::ContextInitialized { project_path: path, .. } => {
-                assert_eq!(path, project_path);
+        // Check event was emitted - we may receive multiple events, so wait for the right one
+        let mut found_context_initialized = false;
+        let timeout_duration = Duration::from_secs(3);
+        let start_time = std::time::Instant::now();
+
+        while start_time.elapsed() < timeout_duration && !found_context_initialized {
+            match timeout(Duration::from_millis(100), event_rx.recv()).await {
+                Ok(Some(event)) => {
+                    match event {
+                        McpEvent::ContextInitialized { project_path: path, .. } => {
+                            assert_eq!(path, project_path);
+                            found_context_initialized = true;
+                        }
+                        McpEvent::ModelAvailabilityChanged { .. } => {
+                            // Ignore model availability events during startup
+                            continue;
+                        }
+                        other => {
+                            // Allow other events but continue waiting
+                            println!("Received event: {:?}", other);
+                            continue;
+                        }
+                    }
+                }
+                Ok(None) => panic!("Event channel closed"),
+                Err(_) => {
+                    // Timeout on individual recv, continue waiting
+                    continue;
+                }
             }
-            _ => panic!("Expected ContextInitialized event"),
+        }
+
+        if !found_context_initialized {
+            panic!("Did not receive ContextInitialized event within timeout");
         }
     }
 
@@ -1267,14 +1365,15 @@ pub fn authenticate(username: &str, password: &str) -> bool {
 
         let content = manager.generate_context_content(&TechStack::Rust);
 
-        assert!(content.contains("Technology Stack"));
+        // Test should expect content from the actual context file, not generic content
         assert!(content.contains("Rust"));
-        assert!(content.contains("Development Guidelines"));
-        assert!(content.contains("Code Quality"));
-        assert!(content.contains("Security"));
-        assert!(content.contains("Performance"));
-        assert!(content.contains("Testing"));
-        assert!(content.contains("Documentation"));
+        assert!(content.contains("GraphQL"));
+        assert!(content.contains("Production"));
+        assert!(content.contains("Code-Writing Best Practices"));
+        assert!(content.contains("Top-Down"));
+
+        // Ensure it's not empty and has substantial content
+        assert!(content.len() > 1000);
     }
 
     #[tokio::test]

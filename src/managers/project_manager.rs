@@ -4,7 +4,9 @@ use crate::models::agent::Agent;
 use crate::models::issue::Issue;
 use crate::enums::{TaskStatus, AgentStatus, IssueStatus, IssueType, CommentType};
 use crate::error::{OrchestratorError, Result};
+use crate::database::{Database, repository::ProjectRepository};
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::{mpsc, RwLock, broadcast};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
@@ -116,6 +118,26 @@ pub enum ProjectCommand {
     // MCP Integration
     ExecuteTaskWithMcp { task_id: Uuid, mcp_client: crate::managers::McpClient, respond_to: mpsc::UnboundedSender<Result<()>> },
     ProcessTaskCompletion { task_id: Uuid, mcp_client: crate::managers::McpClient, respond_to: mpsc::UnboundedSender<Result<()>> },
+    
+    // Status Transition Commands (queue-based)
+    TransitionTaskStatus { task_id: Uuid, new_status: TaskStatus, reason: String },
+    TransitionAgentStatus { agent_id: Uuid, new_status: AgentStatus, reason: String },
+    TransitionIssueStatus { issue_id: Uuid, new_status: IssueStatus, reason: String },
+    
+    // Project Management
+    CreateProject { 
+        name: String, 
+        idea: String, 
+        path: String, 
+        tech_stack: crate::enums::TechStack,
+        repository_url: Option<String>,
+        dependencies_urls: Option<Vec<String>>,
+        mcp_client: crate::managers::McpClient,
+        respond_to: mpsc::UnboundedSender<Result<Project>> 
+    },
+    SaveProject { respond_to: mpsc::UnboundedSender<Result<()>> },
+    LoadProject { path: std::path::PathBuf, respond_to: mpsc::UnboundedSender<Result<Project>> },
+    ExecuteAllTasksInOrder { mcp_client: crate::managers::McpClient, respond_to: mpsc::UnboundedSender<Result<()>> },
 
     // Shutdown
     Shutdown,
@@ -174,6 +196,7 @@ pub struct ProjectManager {
     project: Arc<RwLock<Project>>,
     command_sender: mpsc::UnboundedSender<ProjectCommand>,
     event_broadcaster: broadcast::Sender<ProjectEvent>,
+    repository: Option<ProjectRepository>,
 }
 
 impl ProjectManager {
@@ -183,10 +206,12 @@ impl ProjectManager {
         let (event_broadcaster, _) = broadcast::channel(1000);
         
         let project = Arc::new(RwLock::new(project));
+        
         let manager = ProjectManager {
             project: project.clone(),
             command_sender,
             event_broadcaster: event_broadcaster.clone(),
+            repository: None, // Will be set when database is initialized
         };
         
         // Spawn the background task to handle commands
@@ -202,6 +227,19 @@ impl ProjectManager {
     /// Subscribe to project events
     pub fn subscribe_to_events(&self) -> broadcast::Receiver<ProjectEvent> {
         self.event_broadcaster.subscribe()
+    }
+
+    /// Initialize database for the project
+    pub fn with_database(mut self, db_path: PathBuf) -> Result<Self> {
+        let database = Database::new(db_path)?;
+        self.repository = Some(ProjectRepository::new(database));
+        Ok(self)
+    }
+
+    /// Create a new project manager with database support
+    pub fn new_with_database(project: Project, db_path: PathBuf) -> Result<Self> {
+        let manager = Self::new(project);
+        manager.with_database(db_path)
     }
     
     /// Get a sender for project commands
@@ -322,6 +360,89 @@ impl ProjectManager {
             .ok_or_else(|| OrchestratorError::internal("Failed to receive response"))?
     }
 
+    /// Create a new project with full business logic
+    pub async fn create_project(
+        name: String,
+        idea: String,
+        path: String,
+        tech_stack: crate::enums::TechStack,
+        repository_url: Option<String>,
+        dependencies_urls: Option<Vec<String>>,
+        mcp_client: crate::managers::McpClient,
+    ) -> Result<Self> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        
+        // Create a temporary project manager for the creation process
+        let temp_project = Project::new_with_tech_stack(&name, &idea, &path, tech_stack.clone());
+        let temp_manager = Self::new(temp_project);
+        
+        temp_manager.command_sender.send(ProjectCommand::CreateProject {
+            name,
+            idea,
+            path,
+            tech_stack,
+            repository_url,
+            dependencies_urls,
+            mcp_client,
+            respond_to: tx,
+        }).map_err(|_| OrchestratorError::internal("Failed to send create project command"))?;
+
+        let created_project = rx.recv().await
+            .ok_or_else(|| OrchestratorError::internal("Failed to receive project creation response"))??;
+        
+        // Shutdown temporary manager
+        temp_manager.shutdown().await;
+        
+        // Return new manager with created project
+        Ok(Self::new(created_project))
+    }
+
+    /// Save the current project state to database
+    pub async fn save_project(&self) -> Result<()> {
+        // Always use database
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).map_err(OrchestratorError::Io)?;
+        }
+
+        let database = Database::new(&db_path)?;
+        let repository = ProjectRepository::new(database);
+        Self::handle_save_project_to_database(&self.project, &repository).await
+    }
+
+    /// Load a project from the specified path using database
+    pub async fn load_project(path: std::path::PathBuf) -> Result<Self> {
+        let project_path_str = path.to_string_lossy().to_string();
+        let db_path = crate::utils::cli::get_default_database_path();
+
+        Self::load_project_from_database(&project_path_str, db_path).await
+    }
+
+    /// Load a project from database
+    pub async fn load_project_from_database(project_path: &str, db_path: PathBuf) -> Result<Self> {
+        let database = Database::new(db_path)?;
+        let repository = ProjectRepository::new(database);
+
+        let loaded_project = Self::handle_load_project_from_database(project_path, &repository).await?;
+
+        let mut manager = Self::new(loaded_project);
+        manager.repository = Some(repository);
+
+        Ok(manager)
+    }
+
+    /// Execute all tasks in dependency order
+    pub async fn execute_all_tasks_in_order(&self, mcp_client: crate::managers::McpClient) -> Result<()> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        self.command_sender.send(ProjectCommand::ExecuteAllTasksInOrder {
+            mcp_client,
+            respond_to: tx
+        }).map_err(|_| OrchestratorError::internal("Failed to send execute all tasks command"))?;
+
+        rx.recv().await
+            .ok_or_else(|| OrchestratorError::internal("Failed to receive execute response"))?
+    }
+
     /// Shutdown the project manager
     pub async fn shutdown(&self) {
         let _ = self.command_sender.send(ProjectCommand::Shutdown);
@@ -440,6 +561,88 @@ impl ProjectManager {
                         &event_broadcaster
                     ).await;
                     let _ = respond_to.send(result);
+                }
+
+                ProjectCommand::CreateProject { 
+                    name, idea, path, tech_stack, repository_url, dependencies_urls, mcp_client, respond_to 
+                } => {
+                    let result = Self::handle_create_project(
+                        &project,
+                        name,
+                        idea,
+                        path,
+                        tech_stack,
+                        repository_url,
+                        dependencies_urls,
+                        mcp_client,
+                        &event_broadcaster
+                    ).await;
+                    let _ = respond_to.send(result);
+                }
+
+                ProjectCommand::SaveProject { respond_to } => {
+                    // Use database save method
+                    let db_path = crate::utils::cli::get_default_database_path();
+
+                    // Ensure directory exists
+                    if let Some(parent) = db_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+
+                    let result = match Database::new(&db_path) {
+                        Ok(database) => {
+                            let repository = ProjectRepository::new(database);
+                            Self::handle_save_project_to_database(&project, &repository).await
+                        },
+                        Err(e) => Err(e)
+                    };
+
+                    let _ = respond_to.send(result);
+                }
+
+                ProjectCommand::LoadProject { path, respond_to } => {
+                    let result = Self::handle_load_project(path).await;
+                    let _ = respond_to.send(result);
+                }
+
+                ProjectCommand::ExecuteAllTasksInOrder { mcp_client, respond_to } => {
+                    let result = Self::handle_execute_all_tasks_in_order(
+                        &project,
+                        mcp_client,
+                        &event_broadcaster
+                    ).await;
+                    let _ = respond_to.send(result);
+                }
+
+                // Status Transition Commands (queue-based streaming updates)
+                ProjectCommand::TransitionTaskStatus { task_id, new_status, reason } => {
+                    Self::handle_transition_task_status(
+                        &project,
+                        task_id,
+                        new_status,
+                        reason,
+                        &event_broadcaster
+                    ).await;
+                }
+
+                ProjectCommand::TransitionAgentStatus { agent_id, new_status, reason } => {
+                    Self::handle_transition_agent_status(
+                        &project,
+                        agent_id,
+                        new_status,
+                        reason,
+                        &event_broadcaster
+                    ).await;
+                }
+
+                ProjectCommand::TransitionIssueStatus { issue_id, new_status, reason } => {
+                    Self::handle_transition_issue_status(
+                        &project,
+                        issue_id,
+                        new_status,
+                        reason,
+                        &event_broadcaster
+                    ).await;
                 }
 
                 ProjectCommand::Shutdown => {
@@ -883,10 +1086,13 @@ impl ProjectManager {
         // Collect existing files for context (simplified version)
         debug!("📂 Collecting existing project files for context...");
         let existing_files = {
-            let _project_guard = project.read().await;
-            // TODO: Implement proper file collection based on project path
-            // For now, return empty vector
-            Vec::new()
+            let project_guard = project.read().await;
+            let project_path = PathBuf::from(&project_guard.project_path);
+            debug!("📂 Collecting existing files from project: {:?}", project_path);
+            collect_existing_files_for_context(&project_path).await.unwrap_or_else(|e| {
+                debug!("⚠️  Failed to collect existing files: {}", e);
+                Vec::new()
+            })
         };
         
         // Build completed dependencies context
@@ -943,8 +1149,27 @@ impl ProjectManager {
                     actions_count: response.actions.len(),
                 });
 
-                // Execute the actions returned by MCP
-                debug!("🔄 Executing {} actions...", response.actions.len());
+                // Execute the actions returned by MCP in the project directory
+                let project_path = {
+                    let project_guard = project.read().await;
+                    PathBuf::from(&project_guard.project_path)
+                };
+                
+                debug!("🔄 Executing {} actions in project directory: {:?}...", response.actions.len(), project_path);
+                
+                // Save current working directory
+                let original_dir = std::env::current_dir().map_err(|e| {
+                    debug!("⚠️  Failed to get current directory: {}", e);
+                    e
+                }).unwrap_or_else(|_| PathBuf::from("."));
+                
+                // Change to project directory for action execution
+                if let Err(e) = std::env::set_current_dir(&project_path) {
+                    debug!("⚠️  Failed to change to project directory {:?}: {}", project_path, e);
+                } else {
+                    debug!("📁 Changed working directory to: {:?}", project_path);
+                }
+                
                 for (action_index, action) in response.actions.iter().enumerate() {
                     debug!("   🎬 Executing action {}/{}: {:?}", action_index + 1, response.actions.len(), action);
                     if let Err(e) = action.execute().await {
@@ -953,6 +1178,13 @@ impl ProjectManager {
                     } else {
                         debug!("✅ Action {} executed successfully", action_index + 1);
                     }
+                }
+                
+                // Restore original working directory
+                if let Err(e) = std::env::set_current_dir(&original_dir) {
+                    debug!("⚠️  Failed to restore original directory {:?}: {}", original_dir, e);
+                } else {
+                    debug!("🔙 Restored working directory to: {:?}", original_dir);
                 }
 
                 // Update task status to completed with history tracking
@@ -1102,6 +1334,595 @@ impl ProjectManager {
 
         Ok(())
     }
+
+    /// Handle project creation with full business logic
+    async fn handle_create_project(
+        project: &Arc<RwLock<Project>>,
+        name: String,
+        idea: String,
+        path: String,
+        tech_stack: crate::enums::TechStack,
+        repository_url: Option<String>,
+        dependencies_urls: Option<Vec<String>>,
+        mcp_client: crate::managers::McpClient,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) -> Result<Project> {
+        use std::fs;
+        use std::path::PathBuf;
+        
+        debug!("🚀 ProjectManager: Creating project: {}", name);
+        debug!("💡 ProjectManager: Idea: {}", idea);
+        debug!("📁 ProjectManager: Path: {}", path);
+        debug!("🔧 ProjectManager: Tech Stack: {:?}", tech_stack);
+
+        // Create project directory if it doesn't exist
+        let project_path = PathBuf::from(&path);
+        if !project_path.exists() {
+            fs::create_dir_all(&project_path)
+                .map_err(OrchestratorError::Io)?;
+            debug!("📂 ProjectManager: Created project directory: {}", path);
+        }
+
+        // Initialize context files using MCP
+        debug!("📝 ProjectManager: Initializing context files...");
+        if let Err(e) = mcp_client.initialize_context(project_path.clone(), tech_stack.clone()).await {
+            debug!("Warning: Failed to initialize context files: {}", e);
+        } else {
+            debug!("✅ ProjectManager: Context files created (GEMINI.md, CLAUDE.md)");
+        }
+
+        // Update project with new details
+        let mut project_guard = project.write().await;
+        project_guard.name = name.clone();
+        project_guard.idea = idea.clone();
+        project_guard.project_path = path.clone();
+        project_guard.tech_stack = tech_stack.clone();
+
+        // Set optional repository URL
+        if let Some(repo_url) = repository_url {
+            project_guard.set_repository_url(&repo_url);
+            debug!("🔗 ProjectManager: Repository URL: {}", repo_url);
+        }
+
+        // Set optional dependency URLs
+        if let Some(deps) = dependencies_urls {
+            for url in &deps {
+                if let Err(e) = project_guard.add_dependency_url(url) {
+                    debug!("Warning: Failed to add dependency URL '{}': {}", url, e);
+                }
+            }
+            debug!("📦 ProjectManager: Dependencies: {:?}", deps);
+        }
+
+        // Load agents from the agents directory
+        if let Err(e) = project_guard.load_agents_from_directory("agents").await {
+            debug!("Warning: Failed to load agents from directory: {}", e);
+        } else {
+            debug!("🤖 ProjectManager: Loaded {} agents from agents directory", project_guard.agents.len());
+        }
+
+        // Prepare agent types for idea breakdown
+        let available_agents: Vec<String> = project_guard.agents.iter()
+            .map(|agent| agent.name.clone())
+            .collect();
+
+        // If no agents loaded, use default agent types based on tech stack
+        let agent_types = if available_agents.is_empty() {
+            match tech_stack {
+                crate::enums::TechStack::Rust => vec!["BackendEngineerRust".to_string()],
+                crate::enums::TechStack::Vue => vec!["FrontendEngineerVue".to_string()],
+                crate::enums::TechStack::React => vec!["FrontendEngineerReact".to_string()],
+                crate::enums::TechStack::FullstackRustVue => vec![
+                    "BackendEngineerRust".to_string(),
+                    "FrontendEngineerVue".to_string(),
+                    "DevOpsEngineer".to_string(),
+                ],
+                crate::enums::TechStack::FullstackRustReact => vec![
+                    "BackendEngineerRust".to_string(),
+                    "FrontendEngineerReact".to_string(),
+                    "DevOpsEngineer".to_string(),
+                ],
+            }
+        } else {
+            available_agents
+        };
+
+        // Save project configuration IMMEDIATELY after initial setup to database
+        debug!("💾 ProjectManager: Saving initial project configuration to database");
+
+        // Use default database path
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).map_err(OrchestratorError::Io)?;
+        }
+
+        let database = Database::new(&db_path).map_err(|e| {
+            debug!("Warning: Failed to save to database: {}", e);
+            e
+        })?;
+        let repository = ProjectRepository::new(database);
+        repository.save_project(&*project_guard).map_err(|e| {
+            debug!("Warning: Failed to save project to database: {}", e);
+            e
+        })?;
+        debug!("✅ ProjectManager: Initial project configuration saved to database successfully");
+
+        drop(project_guard); // Release the write lock
+
+        // Execute idea breakdown using MCP Manager
+        debug!("🧠 ProjectManager: Breaking down idea into tasks using AI...");
+        let context = format!("Project: {}\nTech Stack: {:?}\nPath: {}", name, tech_stack, path);
+
+        debug!("🔗 ProjectManager: About to call MCP idea_breakdown with:");
+        debug!("   - Idea: {}", idea);
+        debug!("   - Context: {}", context);
+        debug!("   - Agent types: {:?}", agent_types);
+        debug!("   - Tech stack: {:?}", tech_stack);
+
+        let breakdown_response = match tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            mcp_client.idea_breakdown(
+                idea.clone(),
+                context,
+                agent_types,
+                format!("{:?}", tech_stack),
+                crate::managers::McpModel::Gemini,
+            )
+        ).await {
+            Ok(Ok(response)) => {
+                debug!("✅ ProjectManager: MCP idea_breakdown completed successfully");
+                response
+            },
+            Ok(Err(e)) => {
+                debug!("❌ ProjectManager: MCP idea_breakdown failed: {}", e);
+                return Err(OrchestratorError::internal(format!("MCP integration failed: {}", e)));
+            },
+            Err(_) => {
+                debug!("⏰ ProjectManager: MCP idea_breakdown timed out after 30 seconds");
+                return Err(OrchestratorError::timeout("MCP idea_breakdown call"));
+            }
+        };
+
+        debug!("✅ ProjectManager: Generated {} tasks from idea breakdown", breakdown_response.tasks.len());
+
+        // Convert TaskInput to Task and add to project
+        debug!("🔄 ProjectManager: Adding {} tasks to project", breakdown_response.tasks.len());
+        let mut project_guard = project.write().await;
+        for (index, task_input) in breakdown_response.tasks.iter().enumerate() {
+            debug!("📝 ProjectManager: Processing task {}/{}: '{}'", index + 1, breakdown_response.tasks.len(), task_input.title);
+            
+            let task = Task::from_input(task_input.clone(), None);
+            debug!("   - Generated Task ID: {}", task.id);
+            
+            if let Err(e) = project_guard.add_task(task.clone()) {
+                debug!("❌ ProjectManager: Failed to add task '{}': {}", task_input.title, e);
+            } else {
+                debug!("✅ ProjectManager: Successfully added task '{}' to project", task_input.title);
+            }
+        }
+
+        debug!("📊 ProjectManager: Project now has {} tasks total", project_guard.tasks.len());
+
+        // Save project configuration IMMEDIATELY after tasks are added to database
+        debug!("💾 ProjectManager: Saving project configuration to database");
+
+        // Use default database path
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).map_err(OrchestratorError::Io)?;
+        }
+
+        let database = Database::new(&db_path).map_err(|e| {
+            debug!("Warning: Failed to save to database: {}", e);
+            e
+        })?;
+        let repository = ProjectRepository::new(database);
+        repository.save_project(&*project_guard).map_err(|e| {
+            debug!("Warning: Failed to save project to database: {}", e);
+            e
+        })?;
+        debug!("✅ ProjectManager: Project configuration saved to database successfully");
+
+        // Emit project creation event
+        let _ = event_broadcaster.send(ProjectEvent::ProjectStatusChanged {
+            old_status: "Creating".to_string(),
+            new_status: "Created".to_string(),
+        });
+
+        // Return the created project
+        let result_project = project_guard.clone();
+        drop(project_guard);
+
+        debug!("✅ ProjectManager: Project '{}' created successfully!", name);
+        debug!("📁 ProjectManager: Project saved to database");
+        debug!("🆔 ProjectManager: Project ID: {}", result_project.id);
+        debug!("📊 ProjectManager: Tasks created: {}", result_project.tasks.len());
+
+        Ok(result_project)
+    }
+
+
+
+    /// Handle saving project to database
+    async fn handle_save_project_to_database(
+        project: &Arc<RwLock<Project>>,
+        repository: &ProjectRepository
+    ) -> Result<()> {
+        let project_guard = project.read().await;
+
+        debug!("💾 ProjectManager: Saving project to database: {}", project_guard.name);
+
+        repository.save_project(&*project_guard)?;
+
+        debug!("✅ ProjectManager: Project saved to database successfully");
+        Ok(())
+    }
+
+    /// Handle loading project from database
+    async fn handle_load_project(path: std::path::PathBuf) -> Result<Project> {
+        debug!("📂 ProjectManager: Loading project from database for path: {:?}", path);
+
+        let project_path_str = path.to_string_lossy().to_string();
+        let db_path = crate::utils::cli::get_default_database_path();
+
+        if !db_path.exists() {
+            return Err(OrchestratorError::validation("Database not found. Please create a project first."));
+        }
+
+        let database = Database::new(&db_path)?;
+        let repository = ProjectRepository::new(database);
+
+        let project = repository.load_project(&project_path_str)?;
+
+        debug!("✅ ProjectManager: Successfully loaded project with {} tasks and {} agents",
+               project.tasks.len(), project.agents.len());
+
+        Ok(project)
+    }
+
+    /// Handle loading project from database
+    async fn handle_load_project_from_database(
+        project_path: &str,
+        repository: &ProjectRepository
+    ) -> Result<Project> {
+        debug!("📂 ProjectManager: Loading project from database: {}", project_path);
+
+        let project = repository.load_project(project_path)?;
+
+        debug!("✅ ProjectManager: Successfully loaded project from database with {} tasks and {} agents",
+               project.tasks.len(), project.agents.len());
+
+        Ok(project)
+    }
+
+    /// Handle executing all tasks in dependency order
+    async fn handle_execute_all_tasks_in_order(
+        project: &Arc<RwLock<Project>>,
+        mcp_client: crate::managers::McpClient,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) -> Result<()> {
+        use crate::utils::dependency_resolver::DependencyResolver;
+        use std::collections::HashSet;
+
+        debug!("🎯 ProjectManager: Starting task-by-task development process");
+        
+        let sorted_tasks = {
+            let project_guard = project.read().await;
+            debug!("📊 ProjectManager: Total tasks to execute: {}", project_guard.tasks.len());
+            debug!("🤖 ProjectManager: Total agents available: {}", project_guard.agents.len());
+
+            // Validate dependencies first
+            debug!("🔍 ProjectManager: Validating task dependencies...");
+            DependencyResolver::validate_dependencies(&project_guard.tasks)
+                .map_err(|e| OrchestratorError::validation(&format!("Dependency validation failed: {}", e)))?;
+            debug!("✅ ProjectManager: All task dependencies are valid");
+
+            // Sort tasks by dependencies
+            debug!("📋 ProjectManager: Sorting tasks by dependency order...");
+            DependencyResolver::sort_tasks_by_dependencies(project_guard.tasks.clone())
+                .map_err(|e| OrchestratorError::validation(&format!("Task sorting failed: {}", e)))?
+        };
+
+        debug!("✅ ProjectManager: Tasks sorted successfully");
+
+        // Track completed tasks
+        let mut completed_tasks: HashSet<Uuid> = HashSet::new();
+        let _task_name_mapping: std::collections::HashMap<Uuid, String> = sorted_tasks.iter()
+            .map(|task| (task.id, task.title.clone()))
+            .collect();
+
+        debug!("🚀 ProjectManager: Beginning task execution in dependency order...");
+
+        // Execute tasks one by one
+        for (task_index, task) in sorted_tasks.iter().enumerate() {
+            debug!("");
+            debug!("{}", "=".repeat(80));
+            debug!("🎯 ProjectManager: EXECUTING TASK {}/{}: {}", task_index + 1, sorted_tasks.len(), task.title);
+            debug!("{}", "=".repeat(80));
+
+            // Verify all dependencies are completed
+            debug!("🔍 ProjectManager: Verifying dependencies are satisfied...");
+            if !DependencyResolver::are_dependencies_satisfied(task, &completed_tasks) {
+                debug!("⚠️  ProjectManager: Task '{}' has unsatisfied dependencies, skipping", task.title);
+                debug!("🔄 ProjectManager: Marking task as failed due to unsatisfied dependencies");
+                
+                // Mark task as failed due to dependency issues
+                {
+                    let mut project_guard = project.write().await;
+                    if let Some(mut_task) = project_guard.get_task_mut(task.id) {
+                        if let Err(e) = mut_task.transition_task_status(TaskStatus::Failed) {
+                            debug!("⚠️  Failed to transition task to Failed: {}", e);
+                        } else {
+                            debug!("✅ Task '{}' transitioned to Failed due to dependency issues", task.title);
+                        }
+                    }
+                }
+                
+                // Emit failure event and continue with next task
+                let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                    task_id: task.id,
+                    old_status: TaskStatus::Pending,
+                    new_status: TaskStatus::Failed,
+                });
+                
+                debug!("⏭️  ProjectManager: Skipping to next task");
+                continue;
+            }
+            debug!("✅ ProjectManager: All dependencies satisfied, proceeding with task execution");
+
+            // Execute task via MCP
+            debug!("🤖 ProjectManager: Executing task via MCP...");
+            match Self::handle_execute_task_with_mcp(
+                project,
+                task.id,
+                mcp_client.clone(),
+                event_broadcaster,
+            ).await {
+                Ok(_) => {
+                    debug!("✅ ProjectManager: Task '{}' executed successfully!", task.title);
+                    completed_tasks.insert(task.id);
+                    debug!("✅ ProjectManager: Task '{}' marked as COMPLETED ({}/{} tasks done)",
+                           task.title, completed_tasks.len(), sorted_tasks.len());
+                }
+                Err(e) => {
+                    debug!("❌ ProjectManager: Task '{}' execution failed: {}", task.title, e);
+                    debug!("🔄 ProjectManager: Continuing with next task (non-blocking failure)");
+                    
+                    // Emit failure event but continue processing other tasks
+                    let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                        task_id: task.id,
+                        old_status: TaskStatus::InProgress,
+                        new_status: TaskStatus::Failed,
+                    });
+                    
+                    // DO NOT return error - continue with next task
+                    // Tasks that depend on this failed task will be skipped naturally
+                    debug!("⚠️  ProjectManager: Task '{}' failed but continuing execution", task.title);
+                }
+            }
+
+            debug!("🎉 ProjectManager: Task '{}' completed successfully!", task.title);
+            debug!("📊 ProjectManager: Progress: {}/{} tasks completed", completed_tasks.len(), sorted_tasks.len());
+        }
+
+        debug!("");
+        debug!("🎉 ProjectManager: ALL TASKS COMPLETED SUCCESSFULLY!");
+        debug!("📊 ProjectManager: Final statistics:");
+        debug!("   ✅ Total tasks executed: {}", sorted_tasks.len());
+        debug!("   ✅ All dependencies satisfied");
+        debug!("   ✅ All actions executed successfully");
+
+        // Save final project state to database
+        debug!("📊 ProjectManager: Saving final project state to database...");
+        let db_path = crate::utils::cli::get_default_database_path();
+        if let Some(parent) = db_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        match Database::new(&db_path) {
+            Ok(database) => {
+                let repository = ProjectRepository::new(database);
+                if let Err(e) = Self::handle_save_project_to_database(project, &repository).await {
+                    debug!("⚠️  ProjectManager: Failed to save final project state: {}", e);
+                } else {
+                    debug!("✅ ProjectManager: Final project state saved to database successfully");
+                }
+            },
+            Err(e) => {
+                debug!("⚠️  ProjectManager: Failed to create database connection: {}", e);
+            }
+        }
+
+        debug!("🏁 ProjectManager: Task-by-task development process complete!");
+        Ok(())
+    }
+
+    /// Handle task status transition with streaming updates and status history
+    async fn handle_transition_task_status(
+        project: &Arc<RwLock<Project>>,
+        task_id: Uuid,
+        new_status: TaskStatus,
+        _reason: String,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) {
+        let mut project_guard = project.write().await;
+        
+        if let Some(task) = project_guard.get_task_mut(task_id) {
+            let old_status = task.status.clone();
+            
+            // Transition the task status (this automatically updates status history)
+            if let Err(e) = task.transition_task_status(new_status.clone()) {
+                debug!("❌ Failed to transition task status: {}", e);
+                return;
+            }
+            
+            debug!("🔄 Task '{}' transitioned from {:?} to {:?}", task.title, old_status, new_status);
+            
+            // Emit streaming event
+            let _ = event_broadcaster.send(ProjectEvent::TaskStatusChanged {
+                task_id,
+                old_status,
+                new_status,
+            });
+            
+            // Update project statistics
+            let stats = Self::calculate_statistics_from_project(&*project_guard);
+            let _ = event_broadcaster.send(ProjectEvent::ProjectStatisticsUpdated { stats });
+        } else {
+            debug!("⚠️  Task with ID {} not found for status transition", task_id);
+        }
+    }
+
+    /// Handle agent status transition with streaming updates and status history
+    async fn handle_transition_agent_status(
+        project: &Arc<RwLock<Project>>,
+        agent_id: Uuid,
+        new_status: AgentStatus,
+        reason: String,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) {
+        let mut project_guard = project.write().await;
+        
+        if let Some(agent) = project_guard.get_agent_mut(agent_id) {
+            let old_status = agent.status.clone();
+            let agent_name = agent.name.clone();
+            
+            // Transition the agent status (this automatically updates status history)
+            if let Err(e) = agent.transition_to(new_status.clone(), Some(reason)) {
+                debug!("❌ Failed to transition agent status: {}", e);
+                return;
+            }
+            
+            debug!("🔄 Agent '{}' transitioned from {:?} to {:?}", agent_name, old_status, new_status);
+            
+            // Emit streaming event
+            let _ = event_broadcaster.send(ProjectEvent::AgentStatusChanged {
+                agent_id,
+                agent_name,
+                old_status,
+                new_status,
+            });
+        } else {
+            debug!("⚠️  Agent with ID {} not found for status transition", agent_id);
+        }
+    }
+
+    /// Handle issue status transition with streaming updates and status history
+    async fn handle_transition_issue_status(
+        project: &Arc<RwLock<Project>>,
+        issue_id: Uuid,
+        new_status: IssueStatus,
+        reason: String,
+        event_broadcaster: &broadcast::Sender<ProjectEvent>,
+    ) {
+        let mut project_guard = project.write().await;
+        
+        if let Some(issue) = project_guard.get_issue_mut(issue_id) {
+            let old_status = issue.status.clone();
+            
+            // Transition the issue status (this automatically updates status history)
+            if let Err(e) = issue.transition_to(new_status.clone(), "ProjectManager", Some(reason)) {
+                debug!("❌ Failed to transition issue status: {}", e);
+                return;
+            }
+            
+            debug!("🔄 Issue '{}' transitioned from {:?} to {:?}", issue.title, old_status, new_status);
+            
+            // Emit streaming event
+            let _ = event_broadcaster.send(ProjectEvent::IssueStatusChanged {
+                issue_id,
+                old_status,
+                new_status,
+            });
+            
+            // Update project statistics
+            let stats = Self::calculate_statistics_from_project(&*project_guard);
+            let _ = event_broadcaster.send(ProjectEvent::ProjectStatisticsUpdated { stats });
+        } else {
+            debug!("⚠️  Issue with ID {} not found for status transition", issue_id);
+        }
+    }
+}
+
+/// Collect existing files in the project directory for context
+async fn collect_existing_files_for_context(project_path: &PathBuf) -> Result<Vec<(String, String)>> {
+    debug!("📂 Collecting existing files from: {:?}", project_path);
+    let mut files = Vec::new();
+    
+    // Define file extensions we want to include for context
+    let relevant_extensions = vec![
+        "rs", "js", "ts", "jsx", "tsx", "vue", "py", "go", "java", "cpp", "c", "h",
+        "json", "toml", "yaml", "yml", "md", "txt", "html", "css", "scss", "less",
+        "php", "rb", "swift", "kt", "cs", "scala", "sh", "dockerfile", "xml"
+    ];
+    
+    fn collect_files_recursive(
+        dir: &PathBuf, 
+        files: &mut Vec<(String, String)>, 
+        relevant_extensions: &[&str],
+        base_path: &PathBuf
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                
+                // Skip hidden files and directories
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                }
+                
+                // Skip common directories that usually don't contain source code
+                if path.is_dir() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if matches!(name, "node_modules" | "target" | "build" | "dist" | "__pycache__" | ".git") {
+                            continue;
+                        }
+                    }
+                    collect_files_recursive(&path, files, relevant_extensions, base_path)?;
+                } else if path.is_file() {
+                    // Check if file has a relevant extension
+                    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+                        if relevant_extensions.contains(&extension) {
+                            // Get relative path from project root
+                            let relative_path = path.strip_prefix(base_path)
+                                .unwrap_or(&path)
+                                .to_string_lossy()
+                                .to_string();
+                            
+                            // Read file content (limit size to avoid overwhelming the AI)
+                            match std::fs::read_to_string(&path) {
+                                Ok(content) => {
+                                    let truncated_content = if content.len() > 2000 {
+                                        format!("{}...\n[Content truncated - {} total characters]", 
+                                               &content[..2000], content.len())
+                                    } else {
+                                        content
+                                    };
+                                    files.push((relative_path, truncated_content));
+                                },
+                                Err(e) => {
+                                    debug!("⚠️  Could not read file {:?}: {}", path, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    collect_files_recursive(project_path, &mut files, &relevant_extensions, project_path)
+        .map_err(|e| OrchestratorError::internal(format!("Failed to collect files: {}", e)))?;
+    
+    debug!("📋 Collected {} files for context:", files.len());
+    for (path, content) in &files {
+        debug!("   📄 {} ({} characters)", path, content.len());
+    }
+    
+    Ok(files)
 }
 
 #[cfg(test)]

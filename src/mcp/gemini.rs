@@ -43,10 +43,9 @@ impl GeminiCLI {
     ) -> Result<String> {
         let mut command = Command::new("gemini");
         
-        // Add model selection if specified
-        if let Some(model) = model {
-            command.args(&["--model", model]);
-        }
+        // Add model selection - use gemini-2.5-flash as default if not specified
+        let model_to_use = model.unwrap_or("gemini-2.5-flash");
+        command.args(&["--model", model_to_use]);
 
         // Use -p/--prompt for non-interactive mode as indicated by the help message
         let output = command
@@ -87,12 +86,16 @@ impl GeminiCLI {
         // Ensure GEMINI_API_KEY is set from environment
         if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
             command.env("GEMINI_API_KEY", api_key);
+        } else {
+            tracing::warn!("⚠️  GEMINI_API_KEY not found in environment");
         }
         
-        // Add model selection if specified
-        if let Some(model) = model {
-            command.args(&["--model", model]);
-        }
+        tracing::debug!("🤖 Calling Gemini CLI from directory: {:?}", working_dir);
+        tracing::debug!("📝 Prompt length: {} characters", prompt.len());
+        
+        // Add model selection - use gemini-2.5-flash as default if not specified
+        let model_to_use = model.unwrap_or("gemini-2.5-flash");
+        command.args(&["--model", model_to_use]);
 
         // Use -p/--prompt for non-interactive mode as indicated by the help message
         let output = command
@@ -152,29 +155,10 @@ impl GeminiCLI {
         Ok(response.to_string())
     }
 
-    /// Send a simple query to Gemini CLI
+    /// Send a simple query to Gemini CLI using the preferred model (gemini-2.5-flash)
     pub async fn query(prompt: &str) -> Result<String> {
-        let output = Command::new("gemini")
-            .args(&["-p", prompt])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .output()
-            .await
-            .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(OrchestratorError::internal(format!(
-                "Gemini CLI failed: stderr: {}, stdout: {}",
-                stderr,
-                stdout
-            )));
-        }
-
-        let response = String::from_utf8_lossy(&output.stdout);
-        Ok(response.to_string())
+        // Use the preferred model explicitly
+        Self::query_with_model(prompt, "gemini-2.5-flash").await
     }
 
     /// Send a query with specific model selection
@@ -206,10 +190,10 @@ impl GeminiCLI {
         Ok(response.to_string())
     }
 
-    /// Send a query expecting JSON response
+    /// Send a query expecting JSON response using the preferred model (gemini-2.5-flash)
     pub async fn query_json(prompt: &str) -> Result<serde_json::Value> {
         let output = Command::new("gemini")
-            .args(&["--format", "json"])
+            .args(&["--model", "gemini-2.5-flash", "--format", "json"])
             .arg(prompt)
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
@@ -231,55 +215,27 @@ impl GeminiCLI {
     }
 
     /// Send a query with specific temperature setting
-    pub async fn query_with_temperature(prompt: &str, temperature: f32) -> Result<String> {
-        let temp_str = temperature.to_string();
-        let output = Command::new("gemini")
-            .args(&["gen", "-t", &temp_str, "-p", prompt])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .output()
-            .await
-            .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(OrchestratorError::internal(format!(
-                "Gemini CLI failed: stderr: {}, stdout: {}",
-                stderr,
-                stdout
-            )));
-        }
-
-        let response = String::from_utf8_lossy(&output.stdout);
-        Ok(response.to_string())
+    /// Note: The current Gemini CLI doesn't support temperature control, so this falls back to standard query
+    pub async fn query_with_temperature(prompt: &str, _temperature: f32) -> Result<String> {
+        // The Gemini CLI doesn't support temperature control, so we use the standard query method
+        tracing::warn!("Temperature control not supported by Gemini CLI, using default settings");
+        Self::query(prompt).await
     }
 
     /// List available Gemini models
+    /// Note: The Gemini CLI doesn't provide a models list command, so we return known models
     pub async fn list_models() -> Result<Vec<String>> {
-        let output = Command::new("gemini")
-            .args(&["models", "list"])
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .output()
-            .await
-            .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
+        // Return a list of known Gemini models since the CLI doesn't support listing them
+        // gemini-2.5-flash is the preferred model for this application
+        let known_models = vec![
+            "gemini-2.5-flash".to_string(),
+            "gemini-2.5-pro".to_string(),
+            "gemini-1.5-flash".to_string(),
+            "gemini-1.5-pro".to_string(),
+            "gemini-1.0-pro".to_string(),
+        ];
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(OrchestratorError::internal(format!("Gemini CLI failed: {}", stderr)));
-        }
-
-        let response = String::from_utf8_lossy(&output.stdout);
-        let models: Vec<String> = response
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .collect();
-
-        Ok(models)
+        Ok(known_models)
     }
 
     /// Extract JSON from Gemini response (handles markdown wrapping)
@@ -396,18 +352,28 @@ mod tests {
     #[tokio::test]
     async fn test_gemini_models() {
         if GeminiCLI::is_available().await {
+            // Test the list_models function
             let models = GeminiCLI::list_models().await;
-            assert!(models.is_ok());
-            println!("Available Gemini models: {:?}", models);
+            assert!(models.is_ok(), "Failed to get models: {:?}", models.err());
+
+            let models_list = models.unwrap();
+            assert!(!models_list.is_empty(), "Models list should not be empty");
+            assert!(models_list.contains(&"gemini-2.5-flash".to_string()), "Should include preferred model");
+            assert!(models_list[0] == "gemini-2.5-flash", "gemini-2.5-flash should be first in list");
+
+            println!("Available Gemini models: {:?}", models_list);
         }
     }
 
     #[tokio::test]
     async fn test_gemini_with_model() {
         if GeminiCLI::is_available().await {
-            let response = GeminiCLI::query_with_model("What is the capital of France?", "gemini-pro").await;
-            assert!(response.is_ok());
-            println!("Gemini with model response: {:?}", response);
+            let response = GeminiCLI::query_with_model("What is the capital of France?", "gemini-2.5-flash").await;
+            match &response {
+                Ok(resp) => println!("Gemini with model response: {}", resp),
+                Err(e) => println!("Error in gemini query: {:?}", e),
+            }
+            assert!(response.is_ok(), "Gemini query failed: {:?}", response.err());
         }
     }
 
@@ -415,8 +381,11 @@ mod tests {
     async fn test_gemini_with_temperature() {
         if GeminiCLI::is_available().await {
             let response = GeminiCLI::query_with_temperature("Write a creative story opening", 0.8).await;
-            assert!(response.is_ok());
-            println!("Gemini with temperature response: {:?}", response);
+            match &response {
+                Ok(resp) => println!("Gemini with temperature response: {}", resp),
+                Err(e) => println!("Error in gemini temperature query: {:?}", e),
+            }
+            assert!(response.is_ok(), "Gemini temperature query failed: {:?}", response.err());
         }
     }
 

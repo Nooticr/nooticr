@@ -1,3 +1,5 @@
+pub mod common;
+
 pub struct Prompts {}
 
 impl Prompts {
@@ -8,94 +10,441 @@ impl Prompts {
         tech_stack: &str
     ) -> String {
         format!(
-            r#"Break down this software development idea into a comprehensive, well-structured project plan:
+            r#"Break down this software development idea into a simple 4-6 task pipeline:
 
             PROJECT IDEA: {}
-
             TECHNOLOGY STACK: {}
+            CONTEXT: {}
+            AVAILABLE AGENTS: {:?}
 
-            PROJECT CONTEXT:
-            {}
+            OBJECTIVE: Create a working MVP that can be shipped to production
 
-            AVAILABLE AGENT TYPES: {:?}
+            SIMPLE 4-STAGE PIPELINE:
 
-            COMPREHENSIVE BREAKDOWN REQUIREMENTS:
+            🔧 **STAGE 1: FEATURE DEVELOPMENT (MVP)**
+            - Agent: FeatureDev
+            - Goal: Build the core functionality and make it work
+            - Breaks work into 8-12 dependent todos
+            - After each todo: verify `npm run dev` works (fix errors if any)
+            - After each todo: verify tests pass (fix failing tests)
+            - Only moves to next todo when everything works
+            - Produces working, testable code
 
-            **Phase 1: Planning & Architecture (Critical Foundation)**
-            - Requirements analysis and user story mapping
-            - System architecture design and technology decisions
-            - Database schema design and data modeling
-            - API design and endpoint specification
-            - Security architecture and authentication strategy
-            - Performance requirements and scalability planning
+            🔍 **STAGE 2: CODE REVIEW**
+            - Agent: CodeReviewer
+            - Goal: Ensure code quality, DRY principles, maintainability
+            - Reviews for: code practices, separation of concerns, readability
+            - Produces review feedback for FeatureDev to implement
+            - FeatureDev breaks review feedback into todos and fixes issues
 
-            **Phase 2: Infrastructure & Backend (Core Systems)**
-            - Development environment setup and CI/CD pipeline
-            - Database setup and migration system
-            - Core backend services and business logic
-            - Authentication and authorization system
-            - API implementation with proper error handling
-            - Data validation and security measures
+            🧪 **STAGE 3: QUALITY ASSURANCE**
+            - Agent: QA
+            - Goal: Comprehensive testing and validation
+            - Tests: integration, UI, unit, performance, regression
+            - Breaks QA work into todos for each test type
+            - Produces actions to fix any issues found
+            - Ensures all tests pass with no errors
 
-            **Phase 3: Frontend & Integration (User Experience)**
-            - Frontend application structure and routing
-            - UI component library and design system
-            - API integration and state management
-            - User authentication and session management
-            - Responsive design and accessibility
-            - Error handling and user feedback
+            🚀 **STAGE 4: DEVOPS & DEPLOYMENT**
+            - Agent: DevOps
+            - Goal: Make CI/CD pipeline work and ship to production
+            - Sets up deployment pipeline
+            - Ensures CI/CD passes
+            - Produces actions to fix deployment issues
 
-            **Phase 4: Quality & Deployment (Production Readiness)**
-            - Comprehensive testing strategy (unit, integration, e2e)
-            - Performance optimization and monitoring
-            - Security auditing and vulnerability assessment
-            - Documentation (API docs, user guides, deployment)
-            - Deployment automation and environment configuration
-            - Monitoring, logging, and alerting setup
+            TASK REQUIREMENTS:
+            - Create exactly 4-6 tasks (one per stage, max 2 for complex feature dev)
+            - Each task has clear objective and success criteria
+            - Tasks are sequential and dependent
+            - Each agent produces actionable todos and fixes issues in loops
+            - Focus on making things WORK, not perfect architecture
 
-            TASK SPECIFICATION REQUIREMENTS:
-            - Create 12-20 detailed tasks covering all development phases
-            - Each task must have clear acceptance criteria and deliverables
-            - Include estimated time ranges and complexity scores (1-10)
-            - Specify exact technologies and frameworks to be used
-            - Define proper dependency chains and parallel work opportunities
-            - Include specific testing requirements for each component
-            - Consider security, performance, and scalability from the start
-            - Plan for proper error handling and edge cases
-            - Include deployment and monitoring considerations
-
-            AGENT ASSIGNMENT STRATEGY:
-            - Match tasks to appropriate agent types based on specialization
-            - Consider agent capabilities and technology expertise
-            - Ensure balanced workload distribution across agents
-            - Plan for knowledge transfer between dependent tasks
-
-            Return a JSON array with detailed task specifications (important):
+            Return a JSON array with these simple task specifications:
 
             [{{
-                "id": "unique_task_id",
-                "title": "Specific, actionable task title",
-                "description": "Detailed description with acceptance criteria, deliverables, and technical specifications",
-                "priority": "Critical/High/Medium/Low",
-                "complexity": 1-10,
-                "estimated_hours": "4-8 hours",
-                "agent_type": "specific_agent_type",
-                "tags": ["technology", "component", "phase"],
-                "depends_on": ["prerequisite_task_ids"],
+                "id": "task_1",
+                "title": "Feature Development - Build MVP",
+                "description": "Develop the core functionality. Break into 8-12 todos. After each todo, verify npm run dev works and tests pass. Fix any issues before proceeding.",
+                "priority": "Critical",
+                "complexity": 8,
+                "estimated_hours": "16-24 hours",
+                "agent_type": "FeatureDev",
+                "tags": ["development", "mvp"],
+                "depends_on": [],
                 "acceptance_criteria": [
-                    "Specific measurable outcome 1",
-                    "Specific measurable outcome 2"
-                ],
-                "deliverables": [
-                    "Concrete deliverable 1",
-                    "Concrete deliverable 2"
-                ],
-                "testing_requirements": "Specific testing approach and coverage",
-                "security_considerations": "Security aspects to address",
-                "performance_requirements": "Performance targets and considerations"
+                    "Core functionality implemented and working",
+                    "npm run dev produces no errors",
+                    "All tests pass",
+                    "Code is functional and testable"
+                ]
             }}]
+
+            IMPORTANT: Keep it simple. Focus on working software, not complex architecture.
             "#,
             idea, tech_stack, context, available_agents_types
+        )
+    }
+
+    /// Feature Development Agent Prompt - Breaks work into todos and ensures everything works
+    pub fn feature_dev_todo_prompt(
+        objective: &str,
+        tech_stack: &str,
+        existing_files: &[(String, String)],
+        current_error: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(existing_files, Some(1000));
+        let error_section = if let Some(error) = current_error {
+            format!("CURRENT ERROR TO FIX:\n```\n{}\n```\n", error)
+        } else {
+            "No current errors - proceeding with development.".to_string()
+        };
+
+        format!(
+            r#"🤖 FEATUREDEV AGENT - JSON-ONLY RESPONSE MODE 🤖
+
+OBJECTIVE: {}
+TECH STACK: {}
+
+{}
+
+CURRENT CODEBASE:
+{}
+
+🔧 YOUR DEVELOPMENT WORKFLOW:
+1. If this is your first iteration: Break the objective into 8-12 small, dependent todos
+2. If continuing work: Look at existing code and continue with remaining todos
+3. Work on ONE todo at a time, but COMPLETE ALL TODOS before finishing
+4. After each todo, verify build/dev works (fix errors if any)
+5. After each todo, verify tests pass (fix failing tests)
+6. Only proceed to next todo when current todo works completely
+7. If errors occur, create actions to fix them immediately
+8. ⚠️ CRITICAL: Complete ALL your todos - don't stop after just one!
+
+⚠️ CRITICAL: FOR DEVELOPMENT SERVER COMMANDS:
+- NEVER run blocking commands like `npm run dev`, `cargo run`, `python manage.py runserver`
+- ALWAYS use non-blocking alternatives:
+  - Frontend: Use `npm run build` to verify, not `npm run dev`
+  - Rust: Use `cargo check` or `cargo build` instead of `cargo run`
+  - Python: Use syntax checks instead of running servers
+  - Node.js: Use `node --check` for validation
+- If you must test a server, use: `timeout 10s npm run dev` or background it with `npm run dev > dev.log 2>&1 &`
+
+📋 DEVELOPMENT RULES:
+- Focus on making things WORK, not perfect code
+- Each todo should be completable in 1-2 hours
+- Always verify functionality after each step
+- Fix errors immediately before proceeding
+- Create complete, working code (no TODOs or placeholders)
+
+🚀 PROJECT SETUP GUIDELINES:
+- If incomplete setup exists: Clear problematic files first, then use proper scaffolding
+- If no package.json exists: Use proper scaffolding commands (npm create vue@latest, npm create react-app, etc. always in non intereactive mode)
+- ALWAYS use non-interactive, look for latest versions, and avoid deprecated methods, go to official documentation to see actual commands
+- After scaffolding: Run `npm install` to ensure dependencies are installed
+- Only create individual files AFTER proper project scaffolding is complete
+- If stuck in file creation loop: Stop, use RunCommand with proper scaffolding instead
+
+{}
+
+{}
+
+🚨 CRITICAL RESPONSE FORMAT 🚨
+
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+
+⚠️ CRITICAL PATH REQUIREMENTS:
+- ALWAYS use RELATIVE paths (e.g., "src/App.vue", "package.json")
+- NEVER use absolute paths (e.g., "/home/user/project/src/App.vue")
+- NEVER include app directory in path (e.g., "login-app/src/App.vue" ❌)
+- Files will be created in the project directory automatically
+- Example: "path": "src/components/Login.vue" ✅
+- Example: "path": "login-frontend-app/src/App.vue" ❌
+- Example: "path": "/absolute/path/file.vue" ❌
+
+DO NOT WRITE:
+❌ "I'll start by creating..."
+❌ "Here are the actions..."
+❌ "First, I need to..."
+❌ Any explanatory text
+❌ Absolute file paths
+
+WRITE ONLY:
+✅ [{{ "Write": {{ "path": "src/App.vue", "content": "..." }} }}]
+
+{}
+            "#,
+            objective,
+            tech_stack,
+            error_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::feature_dev_action_examples(),
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// Code Review Agent Prompt - Reviews for quality and maintainability
+    pub fn code_review_agent_prompt(
+        tech_stack: &str,
+        files_to_review: &[(String, String)],
+        focus_areas: &[String],
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(files_to_review, None);
+        let focus_section = PromptBuilder::format_acceptance_criteria(focus_areas);
+
+        format!(
+            r#"🚨🚨🚨 EXTREME CRITICAL: JSON-ONLY MODE - NO TEXT ALLOWED 🚨🚨🚨
+
+🔍 CODEREVIEW AGENT - ABSOLUTELY PURE JSON RESPONSE REQUIRED 🔍
+
+🛑 SYSTEM REQUIREMENT: Your response will be parsed by a JSON parser that WILL FAIL if there is ANY text outside of the JSON array.
+
+⚠️ IF YOU SEE ANY CREDENTIAL MESSAGES - COMPLETELY IGNORE THEM ⚠️
+⚠️ DO NOT ACKNOWLEDGE CREDENTIALS OR AUTHENTICATION ⚠️
+⚠️ YOUR RESPONSE MUST BE EXACTLY: [ ... ] ⚠️
+
+TECH STACK: {}
+
+REVIEW FOCUS AREAS:
+{}
+
+CODE TO REVIEW:
+{}
+
+📝 YOUR REVIEW CRITERIA (RESPOND ONLY WITH JSON ACTIONS):
+1. **DRY Violations**: Look for repeated code that should be extracted
+2. **Code Practices**: Follow language/framework best practices
+3. **Maintainability**: Code should be easy to understand and modify
+4. **Separation of Concerns**: Clear responsibility boundaries
+5. **Readability**: Code should be self-documenting with clear names
+6. **Error Handling**: Proper error handling and edge cases
+7. **Performance**: Obvious performance issues or anti-patterns
+
+⚡ YOUR REVIEW PROCESS (RESPOND ONLY WITH JSON ACTIONS):
+1. Identify code quality issues (DRY violations, bad practices, etc.)
+2. Create specific file modification actions to fix each issue
+3. Ensure actions improve maintainability and readability
+4. Focus on the most critical issues first
+
+{}
+
+{}
+
+🚨🚨🚨 MANDATORY JSON RESPONSE FORMAT 🚨🚨🚨
+
+⛔ SYSTEM WILL CRASH IF YOU WRITE:
+⛔ Any credential messages
+⛔ "After reviewing..." 
+⛔ "I found..."
+⛔ "Here are..."
+⛔ Any text before [
+⛔ Any text after ]
+
+✅ REQUIRED FORMAT: Start typing [ immediately
+✅ End typing ] immediately
+✅ Nothing else allowed
+
+EXAMPLE RESPONSE (COPY THIS FORMAT EXACTLY):
+[
+  {{
+    "Replace": {{
+      "path": "src/utils.js", 
+      "old_content": "function helper1() {{ return 'a'; }}\\nfunction helper2() {{ return 'a'; }}",
+      "new_content": "function commonHelper() {{ return 'a'; }}\\nconst helper1 = commonHelper;\\nconst helper2 = commonHelper;"
+    }}
+  }}
+]
+
+🚨 START YOUR RESPONSE WITH [ RIGHT NOW - NO OTHER TEXT 🚨
+
+{}
+            "#,
+            tech_stack,
+            focus_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::code_review_action_examples(),
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// QA Agent Prompt - Comprehensive testing and validation
+    pub fn qa_agent_prompt(
+        tech_stack: &str,
+        application_files: &[(String, String)],
+        test_types: &[String],
+        current_test_failures: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(application_files, Some(500));
+        let test_types_section = PromptBuilder::format_acceptance_criteria(test_types);
+        let failures_section = if let Some(failures) = current_test_failures {
+            format!("CURRENT TEST FAILURES TO FIX:\n```\n{}\n```\n", failures)
+        } else {
+            "No current test failures - proceeding with QA validation.".to_string()
+        };
+
+        format!(
+            r#"🧪 QA AGENT - JSON-ONLY RESPONSE MODE 🧪
+
+TECH STACK: {}
+
+TEST TYPES TO IMPLEMENT:
+{}
+
+{}
+
+APPLICATION CODE:
+{}
+
+🔄 YOUR QA WORKFLOW:
+1. Break QA work into todos for each test type
+2. Implement/run each test type systematically
+3. Verify all tests pass with no errors
+4. Check for regressions in existing functionality
+5. Validate performance and user experience
+6. Fix any issues found before proceeding
+
+🎯 QA FOCUS AREAS:
+- **Unit Tests**: Test individual functions and components
+- **Integration Tests**: Test component interactions
+- **UI Tests**: Test user interface and interactions
+- **Performance Tests**: Check load times and responsiveness
+- **Regression Tests**: Ensure existing features still work
+- **Error Handling**: Test edge cases and error scenarios
+
+✅ QA RULES:
+- All tests must pass with no errors
+- Fix failing tests immediately
+- Create comprehensive test coverage
+- Validate both happy path and edge cases
+- Ensure no regressions in existing functionality
+
+⚡ YOUR QA PROCESS:
+1. Create actions to write/update test files
+2. Create actions to run tests and capture results
+3. If tests fail, create actions to fix the failures
+4. Create actions to verify no regressions
+5. Repeat until all tests pass
+
+{}
+
+{}
+
+🚨 CRITICAL RESPONSE FORMAT 🚨
+
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+
+DO NOT WRITE:
+❌ "I'll create tests for..."
+❌ "The test suite will include..."
+❌ "QA analysis shows..."
+❌ Any test reports or explanations
+
+WRITE ONLY:
+✅ [{{ "Write": {{ "path": "tests/unit/App.test.js", "content": "..." }} }}]
+
+{}
+            "#,
+            tech_stack,
+            test_types_section,
+            failures_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::qa_action_examples(),
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// DevOps Agent Prompt - CI/CD and deployment
+    pub fn devops_agent_prompt(
+        tech_stack: &str,
+        project_files: &[(String, String)],
+        deployment_target: &str,
+        ci_failures: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(project_files, Some(300));
+        let failures_section = if let Some(failures) = ci_failures {
+            format!("CURRENT CI/CD FAILURES TO FIX:\n```\n{}\n```\n", failures)
+        } else {
+            "No current CI/CD failures - proceeding with deployment setup.".to_string()
+        };
+
+        format!(
+            r#"🚀 DEVOPS AGENT - JSON-ONLY RESPONSE MODE 🚀
+
+TECH STACK: {}
+DEPLOYMENT TARGET: {}
+
+{}
+
+PROJECT STRUCTURE:
+{}
+
+⚙️ YOUR DEVOPS WORKFLOW:
+1. Set up CI/CD pipeline configuration
+2. Ensure build process works correctly
+3. Configure automated testing in CI
+4. Set up deployment automation
+5. Fix any CI/CD failures immediately
+6. Validate deployment works end-to-end
+
+🎯 DEVOPS FOCUS AREAS:
+- **Build Pipeline**: Ensure code builds successfully
+- **Test Automation**: Run tests in CI environment
+- **Deployment Automation**: Automated deployment process
+- **Environment Configuration**: Proper env setup for production
+- **Monitoring**: Basic monitoring and health checks
+- **Security**: Basic security configurations
+
+🔧 DEVOPS RULES:
+- CI/CD pipeline must pass completely
+- Fix pipeline failures immediately
+- Ensure deployment is automated and reliable
+- Validate production deployment works
+- Set up basic monitoring and alerts
+
+⚡ YOUR DEVOPS PROCESS:
+1. Create actions to write CI/CD configuration files
+2. Create actions to test build process locally
+3. Create actions to run CI/CD pipeline and capture results
+4. If pipeline fails, create actions to fix the failures
+5. Create actions to deploy and verify deployment works
+6. Repeat until deployment is successful
+
+{}
+
+{}
+
+🚨 CRITICAL RESPONSE FORMAT 🚨
+
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+
+DO NOT WRITE:
+❌ "I'll set up the CI/CD pipeline..."
+❌ "The deployment will include..."
+❌ "DevOps configuration shows..."
+❌ Any deployment plans or explanations
+
+WRITE ONLY:
+✅ [{{ "Write": {{ "path": ".github/workflows/ci.yml", "content": "..." }} }}]
+
+{}
+            "#,
+            tech_stack,
+            deployment_target,
+            failures_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::devops_action_examples(),
+            PromptBuilder::json_formatting_requirements()
         )
     }
 
@@ -107,18 +456,10 @@ impl Prompts {
         requirements: &str,
         acceptance_criteria: &[String],
     ) -> String {
-        let files_section = existing_files
-            .iter()
-            .map(|(file_path, content)| format!("FILE: {}\n```\n{}\n```", file_path, content))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        use crate::prompts::common::PromptBuilder;
 
-        let criteria_section = acceptance_criteria
-            .iter()
-            .enumerate()
-            .map(|(i, criteria)| format!("{}. {}", i + 1, criteria))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let files_section = PromptBuilder::format_files_section(existing_files, None);
+        let criteria_section = PromptBuilder::format_acceptance_criteria(acceptance_criteria);
 
         format!(
             r#"Implement this specific task with comprehensive development approach:
@@ -182,91 +523,9 @@ impl Prompts {
 
             Return a JSON array of actions to be executed in order (important):
 
-            [{{
-                "Write": {{
-                    "path": "exact/file/path.ext",
-                    "content": "complete file content with proper formatting"
-                }}
-            }},
-            {{
-                "Update": {{
-                    "path": "existing/file/path.ext",
-                    "content": "updated complete file content"
-                }}
-            }},
-            {{
-                "Replace": {{
-                    "path": "existing/file/path.ext",
-                    "old_content": "content to replace",
-                    "new_content": "replacement content"
-                }}
-            }},
-            {{
-                "CreateDirectory": {{
-                    "path": "new/directory/path"
-                }}
-            }},
-            {{
-                "Backup": {{
-                    "path": "important/file.ext",
-                    "backup_suffix": ".bak"
-                }}
-            }},
-            {{
-                "Append": {{
-                    "path": "existing/file.ext",
-                    "content": "content to append"
-                }}
-            }},
-            {{
-                "SetPermissions": {{
-                    "path": "file/path.ext",
-                    "permissions": "755"
-                }}
-            }},
-            {{
-                "Archive": {{
-                    "source_paths": ["file1.txt", "file2.txt"],
-                    "archive_path": "backup.tar.gz",
-                    "format": "tar.gz"
-                }}
-            }},
-            {{
-                "Grep": {{
-                    "pattern": "search_pattern",
-                    "path": "file_or_directory",
-                    "recursive": true,
-                    "case_sensitive": false
-                }}
-            }},
-            {{
-                "RunCommand": {{
-                    "command": "specific command to execute",
-                    "env": [["ENV_VAR", "value"]]
-                }}
-            }}]
+            {}
 
-            AVAILABLE ACTIONS:
-            • Write - Create new files with content
-            • Read - Read file contents
-            • Update - Update existing file with new content
-            • Replace - Replace specific content in files
-            • Delete - Remove files
-            • Move - Move/rename files
-            • Copy - Copy files
-            • CreateDirectory - Create directories
-            • RemoveDirectory - Remove directories (with recursive option)
-            • ListDirectory - List directory contents
-            • Backup - Create file backups
-            • Append - Append content to files
-            • SetPermissions - Set file permissions (Unix)
-            • CreateSymlink - Create symbolic links
-            • Grep - Search for patterns in files
-            • Archive - Create archives (zip, tar, tar.gz)
-            • Extract - Extract archives
-            • Download - Download files from URLs
-            • Watch - Watch files for changes
-            • RunCommand - Execute shell commands
+            {}
 
             IMPORTANT GUIDELINES:
             - Provide complete, production-ready code
@@ -280,7 +539,14 @@ impl Prompts {
             - Ensure security best practices are followed
             - Make the code maintainable and extensible
             "#,
-            task_description, requirements, criteria_section, codebase_context, files_section, tech_stack
+            task_description,
+            requirements,
+            criteria_section,
+            codebase_context,
+            files_section,
+            tech_stack,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::json_formatting_requirements()
         )
     }
 
@@ -297,46 +563,11 @@ impl Prompts {
         acceptance_criteria: &[String],
         codebase_context: &str,
     ) -> String {
-        let files_section = if existing_files.is_empty() {
-            "No existing files in the project yet.".to_string()
-        } else {
-            existing_files
-                .iter()
-                .map(|(file_path, content)| {
-                    let preview = if content.len() > 500 {
-                        format!("{}...\n[Content truncated - {} total characters]", 
-                               &content[..500], content.len())
-                    } else {
-                        content.clone()
-                    };
-                    format!("FILE: {}\n```\n{}\n```", file_path, preview)
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        };
+        let files_section = crate::prompts::common::PromptBuilder::format_files_section(existing_files, Some(500));
 
-        let criteria_section = if acceptance_criteria.is_empty() {
-            "No specific acceptance criteria provided.".to_string()
-        } else {
-            acceptance_criteria
-                .iter()
-                .enumerate()
-                .map(|(i, criteria)| format!("{}. {}", i + 1, criteria))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
+        let criteria_section = crate::prompts::common::PromptBuilder::format_acceptance_criteria(acceptance_criteria);
 
-        let dependencies_section = if completed_dependencies.is_empty() {
-            "No dependencies - this is a foundational task.".to_string()
-        } else {
-            format!("This task builds upon the following completed tasks:\n{}",
-                    completed_dependencies
-                        .iter()
-                        .enumerate()
-                        .map(|(i, dep)| format!("{}. {}", i + 1, dep))
-                        .collect::<Vec<_>>()
-                        .join("\n"))
-        };
+        let dependencies_section = crate::prompts::common::PromptBuilder::format_dependencies_section(completed_dependencies);
 
         let tags_section = task_tags.join(", ");
 
@@ -444,191 +675,7 @@ impl Prompts {
             - Include ALL necessary imports, dependencies, and configurations
             - Ensure the task is fully implemented and ready for use
 
-            AVAILABLE ACTIONS AND THEIR EXACT JSON FORMAT:
-
-            {{
-                "Write": {{
-                    "path": "exact/file/path.ext",
-                    "content": "complete file content - MUST be valid and complete code"
-                }}
-            }}
-
-            {{
-                "Read": {{
-                    "path": "file/to/read.ext"
-                }}
-            }}
-
-            {{
-                "Update": {{
-                    "path": "existing/file.ext", 
-                    "content": "complete updated file content"
-                }}
-            }}
-
-            {{
-                "Replace": {{
-                    "path": "existing/file.ext",
-                    "old_content": "exact text to replace",
-                    "new_content": "replacement text"
-                }}
-            }}
-
-            {{
-                "Delete": {{
-                    "path": "file/to/delete.ext"
-                }}
-            }}
-
-            {{
-                "Move": {{
-                    "old_path": "current/path.ext",
-                    "new_path": "new/path.ext"
-                }}
-            }}
-
-            {{
-                "Copy": {{
-                    "old_path": "source/file.ext",
-                    "new_path": "destination/file.ext"
-                }}
-            }}
-
-            {{
-                "CreateDirectory": {{
-                    "path": "directory/path"
-                }}
-            }}
-
-            {{
-                "RemoveDirectory": {{
-                    "path": "directory/to/remove",
-                    "recursive": true
-                }}
-            }}
-
-            {{
-                "ListDirectory": {{
-                    "path": "directory/to/list",
-                    "recursive": false
-                }}
-            }}
-
-            {{
-                "Append": {{
-                    "path": "existing/file.ext",
-                    "content": "content to append to end of file"
-                }}
-            }}
-
-            {{
-                "Backup": {{
-                    "path": "file/to/backup.ext",
-                    "backup_suffix": ".bak"
-                }}
-            }}
-
-            {{
-                "SetPermissions": {{
-                    "path": "file/or/directory",
-                    "permissions": "755"
-                }}
-            }}
-
-            {{
-                "CreateSymlink": {{
-                    "target": "path/to/target",
-                    "link_path": "path/to/symlink"
-                }}
-            }}
-
-            {{
-                "RunCommand": {{
-                    "command": "shell command to execute",
-                    "env": [["ENV_VAR", "value"], ["ANOTHER_VAR", "value2"]]
-                }}
-            }}
-
-            {{
-                "Grep": {{
-                    "pattern": "search pattern or regex",
-                    "path": "file/or/directory/to/search",
-                    "recursive": true,
-                    "case_sensitive": false
-                }}
-            }}
-
-            {{
-                "Archive": {{
-                    "source_paths": ["file1.txt", "directory/", "file2.txt"],
-                    "archive_path": "backup.tar.gz",
-                    "format": "tar.gz"
-                }}
-            }}
-
-            {{
-                "Extract": {{
-                    "archive_path": "archive.tar.gz",
-                    "destination": "extract/destination/"
-                }}
-            }}
-
-            {{
-                "Download": {{
-                    "url": "https://example.com/file.zip",
-                    "destination": "local/file.zip"
-                }}
-            }}
-
-            {{
-                "Watch": {{
-                    "path": "file/or/directory/to/watch",
-                    "duration_seconds": 60
-                }}
-            }}
-
-            EXAMPLE ACTION ARRAY:
-            [
-                {{
-                    "CreateDirectory": {{
-                        "path": "src/components"
-                    }}
-                }},
-                {{
-                    "Write": {{
-                        "path": "src/components/TaskManager.tsx",
-                        "content": "import React from 'react';\n\ninterface Task {{\n  id: string;\n  title: string;\n  completed: boolean;\n}}\n\nconst TaskManager: React.FC = () => {{\n  const [tasks, setTasks] = React.useState<Task[]>([]);\n  return (\n    <div className=\"task-manager\">\n      <h1>Task Manager</h1>\n    </div>\n  );\n}};\n\nexport default TaskManager;"
-                    }}
-                }},
-                {{
-                    "Update": {{
-                        "path": "package.json",
-                        "content": "{{\n  \"name\": \"my-app\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {{\n    \"react\": \"^18.0.0\"\n  }}\n}}"
-                    }}
-                }},
-                {{
-                    "RunCommand": {{
-                        "command": "npm install",
-                        "env": []
-                    }}
-                }}
-            ]
-
-            CRITICAL JSON FORMATTING REQUIREMENTS:
-            - Return ONLY a valid JSON array of actions, no other text
-            - Escape all special characters in strings (quotes, backslashes, newlines)
-            - Use \\n for newlines, \\" for quotes, \\\\ for backslashes in content
-            - Ensure all braces and brackets are properly matched
-            - Do not include any comments or explanations outside the JSON
-            - Validate that your JSON can be parsed by standard JSON parsers
-
-            IMPORTANT GUIDELINES:
-            - Provide COMPLETE, working code - not placeholders or comments like "// TODO"
-            - Each file should compile/run successfully after creation
-            - Include all necessary imports, types, and dependencies
-            - Follow the existing project structure and conventions
-            - Make the implementation specific to the task requirements
-            - Ensure proper error handling and edge case coverage
+            {}
             - Test that your actions would create a functional implementation
             - Double-check that all JSON is properly escaped and valid
 
@@ -643,7 +690,8 @@ impl Prompts {
             dependencies_section,
             criteria_section,
             codebase_context,
-            files_section
+            files_section,
+            crate::prompts::common::PromptBuilder::AVAILABLE_ACTIONS
         )
     }
 
@@ -653,11 +701,7 @@ impl Prompts {
         context: &str,
         pull_request_id: &str
     ) -> String {
-        let files_section = files_and_code
-            .iter()
-            .map(|(file_path, code)| format!("FILE: {}\n```\n{}\n```", file_path, code))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let files_section = crate::prompts::common::PromptBuilder::format_files_section(files_and_code, None);
 
         format!(
             r#"Review this code implementation against the requirements:
@@ -1295,11 +1339,7 @@ impl Prompts {
         api_documentation: &str,
         tech_stack: &str,
     ) -> String {
-        let frontend_files_section = frontend_code
-            .iter()
-            .map(|(file_path, content)| format!("FILE: {}\n```\n{}\n```", file_path, content))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let frontend_files_section = crate::prompts::common::PromptBuilder::format_files_section(frontend_code, None);
 
         format!(
             r#"Synchronize API calls between backend and frontend with comprehensive analysis:
@@ -1467,18 +1507,9 @@ impl Prompts {
         bottlenecks: &[String],
         tech_stack: &str,
     ) -> String {
-        let files_section = application_code
-            .iter()
-            .map(|(file_path, content)| format!("FILE: {}\n```\n{}\n```", file_path, content))
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let files_section = crate::prompts::common::PromptBuilder::format_files_section(application_code, None);
 
-        let bottlenecks_section = bottlenecks
-            .iter()
-            .enumerate()
-            .map(|(i, bottleneck)| format!("{}. {}", i + 1, bottleneck))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let bottlenecks_section = crate::prompts::common::PromptBuilder::format_bottlenecks_section(bottlenecks);
 
         format!(
             r#"Optimize application performance with comprehensive analysis and solutions:
@@ -1827,6 +1858,522 @@ Remember: Your goal is to provide actionable, precise solutions that an automate
             previous_actions_section,
             project_structure_section,
             relevant_files_section
+        )
+    }
+
+    /// Error Recovery Agent Prompt - Fixes compilation and runtime errors
+    pub fn error_recovery_prompt(
+        tech_stack: &str,
+        error_output: &str,
+        command_that_failed: &str,
+        project_files: &[(String, String)],
+        recent_changes: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(project_files, Some(800));
+        let changes_section = if let Some(changes) = recent_changes {
+            format!("RECENT CHANGES THAT MAY HAVE CAUSED THE ERROR:\n{}\n", changes)
+        } else {
+            "No recent changes information available.".to_string()
+        };
+
+        format!(
+            r#"🔧 ERROR RECOVERY AGENT - JSON-ONLY RESPONSE MODE 🔧
+
+TECH STACK: {}
+FAILED COMMAND: {}
+
+🚨 ERROR OUTPUT:
+```
+{}
+```
+
+{}
+
+📁 CURRENT PROJECT FILES:
+{}
+
+🔍 YOUR ERROR RECOVERY PROCESS:
+1. Analyze the error message and identify the root cause
+2. Determine what files need to be modified to fix the error
+3. Create specific actions to fix the identified issues
+4. Ensure the fix addresses the root cause, not just symptoms
+5. Verify the solution works with the tech stack being used
+
+⚠️ COMMON ERROR TYPES YOU HANDLE:
+
+**COMPILATION ERRORS:**
+- Syntax errors (missing semicolons, brackets, etc.)
+- Type errors (TypeScript, Rust, etc.)  
+- Import/export errors
+- Missing dependencies
+- Configuration issues
+
+**RUNTIME ERRORS:**
+- Module not found errors
+- Missing environment variables
+- Port conflicts
+- Permission issues
+- Path resolution problems
+
+**BUILD ERRORS:**
+- Webpack/Vite configuration issues
+- Asset loading problems
+- Plugin conflicts
+- Version compatibility issues
+
+**DEPENDENCY ERRORS:**
+- Missing packages
+- Version conflicts
+- Peer dependency issues
+- Lock file inconsistencies
+
+💻 TECH STACK SPECIFIC COMMANDS (NON-BLOCKING):
+- **JavaScript/Node.js**: `npm run build`, `npm test`, `node --check file.js`
+- **TypeScript**: `tsc`, `npm run type-check`
+- **Vue.js**: `npm run build`, `npm run type-check`
+- **React**: `npm run build`, `npm test`
+- **Rust**: `cargo check`, `cargo build`, `cargo test`
+- **Python**: `python -m py_compile`, `python -m pytest`
+
+⚠️ AVOID BLOCKING COMMANDS:
+- ❌ `npm run dev` (blocks terminal)
+- ❌ `cargo run` (runs server, blocks)
+- ❌ `python manage.py runserver` (blocks)
+- ❌ `flask run` (blocks)
+- ✅ Use build/check commands instead
+
+🔧 ERROR FIXING RULES:
+- Focus on fixing the immediate error first
+- Create minimal changes that solve the problem
+- Don't introduce new features while fixing errors
+- Ensure fixes are compatible with the tech stack
+- Test the fix by running the failed command again
+
+⚡ YOUR ERROR FIXING WORKFLOW:
+1. Identify the specific file(s) causing the error
+2. Create actions to fix syntax, imports, or configuration issues
+3. Create actions to install missing dependencies if needed
+4. Create actions to run the command again to verify the fix
+5. If still failing, create additional actions to address remaining issues
+
+{}
+
+{}
+
+🚨 CRITICAL RESPONSE FORMAT 🚨
+
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+
+DO NOT WRITE:
+❌ "The error is caused by..."
+❌ "I need to fix..."
+❌ "Analysis shows..."
+❌ Any error explanations
+
+WRITE ONLY:
+✅ [{{ "Replace": {{ "path": "src/main.ts", "old_content": "...", "new_content": "..." }} }}]
+
+{}
+            "#,
+            tech_stack,
+            command_that_failed,
+            error_output,
+            changes_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::error_recovery_action_examples(),
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// Unit Testing Agent Prompt - Creates and runs unit tests
+    pub fn unit_testing_prompt(
+        tech_stack: &str,
+        target_files: &[(String, String)],
+        test_framework: &str,
+        existing_tests: &[(String, String)],
+        test_failures: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let target_files_section = PromptBuilder::format_files_section(target_files, Some(600));
+        let existing_tests_section = if existing_tests.is_empty() {
+            "No existing tests found.".to_string()
+        } else {
+            PromptBuilder::format_files_section(existing_tests, Some(400))
+        };
+        let failures_section = if let Some(failures) = test_failures {
+            format!("CURRENT TEST FAILURES TO FIX:\n```\n{}\n```\n", failures)
+        } else {
+            "No current test failures - creating new tests.".to_string()
+        };
+
+        format!(
+            r#"You are a UnitTesting agent. Your job is to create comprehensive unit tests and ensure they pass.
+
+            TECH STACK: {}
+            TEST FRAMEWORK: {}
+
+            {}
+
+            TARGET CODE TO TEST:
+            {}
+
+            EXISTING TESTS:
+            {}
+
+            YOUR UNIT TESTING PROCESS:
+            1. Analyze the target code to understand its functionality
+            2. Create comprehensive unit tests covering all functions/methods
+            3. Test both happy path and edge cases
+            4. Ensure proper test isolation and setup/teardown
+            5. Run tests and fix any failures immediately
+            6. Achieve high test coverage (aim for 90%+)
+
+            UNIT TESTING FOCUS AREAS:
+            - **Function Testing**: Test individual functions with various inputs
+            - **Edge Cases**: Test boundary conditions, null/undefined, empty arrays
+            - **Error Handling**: Test error conditions and exception handling
+            - **Mocking**: Mock external dependencies and API calls
+            - **Assertions**: Use appropriate assertions for different data types
+            - **Test Data**: Create realistic test data and fixtures
+
+            TESTING PATTERNS BY TECH STACK:
+            - **JavaScript/Jest**: describe, it, expect, beforeEach, afterEach
+            - **TypeScript/Vitest**: import {{ describe, it, expect, vi }}
+            - **Vue/Vue Test Utils**: mount, shallowMount, wrapper.find()
+            - **React/Testing Library**: render, screen, fireEvent, waitFor
+            - **Rust**: #[test], assert_eq!, assert!, #[should_panic]
+            - **Python/pytest**: def test_*, assert, fixtures, parametrize
+            - **Go**: func Test*, testing.T, assert packages
+
+            RULES:
+            - MUST RETURN JSON ACTIONS - no text explanations
+            - Create complete, runnable test files
+            - Test all public functions and methods
+            - Include setup and teardown when needed
+            - Use proper naming conventions for tests
+            - Ensure tests are independent and can run in any order
+            - Fix failing tests immediately before proceeding
+
+            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix unit tests.
+            DO NOT return test plans - CREATE ACTIONS to make tests work.
+
+            YOUR UNIT TESTING WORKFLOW:
+            1. Create actions to write comprehensive test files
+            2. Create actions to run the tests
+            3. If tests fail, create actions to fix the failures
+            4. Create actions to verify test coverage
+            5. Repeat until all tests pass with good coverage
+
+            Return a JSON array of actions to create/run/fix unit tests:
+
+            {}
+
+            {}
+
+            {}
+            "#,
+            tech_stack,
+            test_framework,
+            failures_section,
+            target_files_section,
+            existing_tests_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::unit_testing_action_examples(),
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// Integration Testing Agent Prompt - Tests component interactions
+    pub fn integration_testing_prompt(
+        tech_stack: &str,
+        application_files: &[(String, String)],
+        test_framework: &str,
+        integration_scenarios: &[String],
+        test_failures: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let app_files_section = PromptBuilder::format_files_section(application_files, Some(500));
+        let scenarios_section = PromptBuilder::format_acceptance_criteria(integration_scenarios);
+        let failures_section = if let Some(failures) = test_failures {
+            format!("CURRENT INTEGRATION TEST FAILURES TO FIX:\n```\n{}\n```\n", failures)
+        } else {
+            "No current integration test failures - creating new tests.".to_string()
+        };
+
+        format!(
+            r#"You are an IntegrationTesting agent. Your job is to test component interactions and data flow.
+
+            TECH STACK: {}
+            TEST FRAMEWORK: {}
+
+            {}
+
+            INTEGRATION TEST SCENARIOS:
+            {}
+
+            APPLICATION CODE:
+            {}
+
+            YOUR INTEGRATION TESTING PROCESS:
+            1. Identify component boundaries and interaction points
+            2. Create tests for data flow between components
+            3. Test API integrations and external service calls
+            4. Verify database operations and transactions
+            5. Test authentication and authorization flows
+            6. Ensure proper error propagation between layers
+
+            INTEGRATION TESTING FOCUS AREAS:
+            - **API Testing**: Test REST/GraphQL endpoints with real requests
+            - **Database Testing**: Test CRUD operations and transactions
+            - **Service Integration**: Test interactions between services
+            - **Authentication Flow**: Test login, logout, token refresh
+            - **Error Handling**: Test error propagation across layers
+            - **Data Validation**: Test input validation and sanitization
+
+            INTEGRATION PATTERNS BY TECH STACK:
+            - **JavaScript/Node.js**: supertest, axios, database connections
+            - **Vue.js**: Vue Test Utils with real API calls
+            - **React**: React Testing Library with MSW or real APIs
+            - **Rust**: reqwest, sqlx, integration test modules
+            - **Python**: requests, pytest fixtures, database setup
+            - **Go**: net/http/httptest, database/sql testing
+
+            RULES:
+            - MUST RETURN JSON ACTIONS - no text explanations
+            - Test real component interactions, not mocks
+            - Set up proper test databases/environments
+            - Clean up test data after each test
+            - Test both success and failure scenarios
+            - Verify data consistency across operations
+
+            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix integration tests.
+            DO NOT return test strategies - CREATE ACTIONS to make integration tests work.
+
+            YOUR INTEGRATION TESTING WORKFLOW:
+            1. Create actions to set up test environment and data
+            2. Create actions to write integration test files
+            3. Create actions to run the integration tests
+            4. If tests fail, create actions to fix the failures
+            5. Create actions to clean up test environment
+            6. Repeat until all integration tests pass
+
+            Return a JSON array of actions to create/run/fix integration tests:
+
+            {}
+
+            {}
+
+            {}
+            "#,
+            tech_stack,
+            test_framework,
+            failures_section,
+            scenarios_section,
+            app_files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::integration_testing_action_examples(),
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// End-to-End Testing Agent Prompt - Tests complete user workflows
+    pub fn e2e_testing_prompt(
+        tech_stack: &str,
+        application_url: &str,
+        user_workflows: &[String],
+        test_framework: &str,
+        test_failures: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let workflows_section = PromptBuilder::format_acceptance_criteria(user_workflows);
+        let failures_section = if let Some(failures) = test_failures {
+            format!("CURRENT E2E TEST FAILURES TO FIX:\n```\n{}\n```\n", failures)
+        } else {
+            "No current E2E test failures - creating new tests.".to_string()
+        };
+
+        format!(
+            r#"You are an E2ETesting agent. Your job is to test complete user workflows from start to finish.
+
+            TECH STACK: {}
+            APPLICATION URL: {}
+            TEST FRAMEWORK: {}
+
+            {}
+
+            USER WORKFLOWS TO TEST:
+            {}
+
+            YOUR E2E TESTING PROCESS:
+            1. Set up browser automation and test environment
+            2. Create tests that simulate real user interactions
+            3. Test complete user journeys from login to task completion
+            4. Verify UI elements, navigation, and data persistence
+            5. Test across different browsers and screen sizes
+            6. Ensure tests are stable and not flaky
+
+            E2E TESTING FOCUS AREAS:
+            - **User Authentication**: Login, logout, registration flows
+            - **Navigation**: Menu navigation, routing, deep links
+            - **Form Interactions**: Input validation, submission, error handling
+            - **Data Operations**: CRUD operations through the UI
+            - **UI Responsiveness**: Mobile, tablet, desktop layouts
+            - **Performance**: Page load times, interaction responsiveness
+
+            E2E PATTERNS BY TECH STACK:
+            - **Playwright**: page.goto(), page.click(), page.fill(), expect()
+            - **Cypress**: cy.visit(), cy.get(), cy.click(), cy.type(), cy.should()
+            - **Selenium**: driver.get(), driver.find_element(), element.click()
+            - **Puppeteer**: page.goto(), page.click(), page.type(), page.waitFor()
+
+            RULES:
+            - MUST RETURN JSON ACTIONS - no text explanations
+            - Create realistic user scenarios and test data
+            - Use proper selectors (data-testid preferred)
+            - Add appropriate waits and assertions
+            - Clean up test data after each test
+            - Make tests independent and repeatable
+
+            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix E2E tests.
+            DO NOT return test scenarios - CREATE ACTIONS to make E2E tests work.
+
+            YOUR E2E TESTING WORKFLOW:
+            1. Create actions to set up E2E test environment
+            2. Create actions to write E2E test files
+            3. Create actions to run the E2E tests
+            4. If tests fail, create actions to fix the failures
+            5. Create actions to generate test reports
+            6. Repeat until all E2E tests pass consistently
+
+            Return a JSON array of actions to create/run/fix E2E tests:
+
+            {}
+
+            {}
+
+            {}
+            "#,
+            tech_stack,
+            application_url,
+            test_framework,
+            failures_section,
+            workflows_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::e2e_testing_action_examples(),
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// Performance Testing Agent Prompt - Tests application performance
+    pub fn performance_testing_prompt(
+        tech_stack: &str,
+        application_url: &str,
+        performance_targets: &[(String, String)], // (metric, target)
+        test_scenarios: &[String],
+        test_failures: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let targets_section = performance_targets
+            .iter()
+            .enumerate()
+            .map(|(i, (metric, target))| format!("{}. {}: {}", i + 1, metric, target))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let scenarios_section = PromptBuilder::format_acceptance_criteria(test_scenarios);
+        let failures_section = if let Some(failures) = test_failures {
+            format!("CURRENT PERFORMANCE TEST FAILURES TO FIX:\n```\n{}\n```\n", failures)
+        } else {
+            "No current performance test failures - creating new tests.".to_string()
+        };
+
+        format!(
+            r#"You are a PerformanceTesting agent. Your job is to test application performance and ensure it meets targets.
+
+            TECH STACK: {}
+            APPLICATION URL: {}
+
+            {}
+
+            PERFORMANCE TARGETS:
+            {}
+
+            TEST SCENARIOS:
+            {}
+
+            YOUR PERFORMANCE TESTING PROCESS:
+            1. Set up performance testing tools and environment
+            2. Create load tests for different user scenarios
+            3. Measure response times, throughput, and resource usage
+            4. Test under various load conditions (normal, peak, stress)
+            5. Identify performance bottlenecks and optimization opportunities
+            6. Verify performance targets are met consistently
+
+            PERFORMANCE TESTING FOCUS AREAS:
+            - **Load Testing**: Normal expected load conditions
+            - **Stress Testing**: Beyond normal capacity limits
+            - **Spike Testing**: Sudden increases in load
+            - **Volume Testing**: Large amounts of data processing
+            - **Endurance Testing**: Extended periods of normal load
+            - **Scalability Testing**: Performance under increasing load
+
+            PERFORMANCE TOOLS BY TECH STACK:
+            - **JavaScript/Node.js**: Artillery, k6, autocannon
+            - **Web Applications**: Lighthouse, WebPageTest, GTmetrix
+            - **API Testing**: Apache Bench (ab), wrk, hey
+            - **Database**: pgbench, sysbench, database-specific tools
+            - **Monitoring**: New Relic, DataDog, Prometheus
+
+            PERFORMANCE METRICS TO MEASURE:
+            - **Response Time**: Average, median, 95th percentile
+            - **Throughput**: Requests per second, transactions per minute
+            - **Resource Usage**: CPU, memory, disk, network
+            - **Error Rate**: Percentage of failed requests
+            - **Concurrent Users**: Maximum supported users
+            - **Page Load Time**: First contentful paint, time to interactive
+
+            RULES:
+            - MUST RETURN JSON ACTIONS - no text explanations
+            - Create realistic load patterns and user scenarios
+            - Measure multiple performance metrics
+            - Run tests multiple times for consistency
+            - Document performance baselines and regressions
+            - Fix performance issues immediately when found
+
+            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix performance tests.
+            DO NOT return performance analysis - CREATE ACTIONS to make performance tests work.
+
+            YOUR PERFORMANCE TESTING WORKFLOW:
+            1. Create actions to set up performance testing tools
+            2. Create actions to write performance test scripts
+            3. Create actions to run performance tests
+            4. Create actions to analyze results and generate reports
+            5. If targets not met, create actions to optimize performance
+            6. Repeat until all performance targets are achieved
+
+            Return a JSON array of actions to create/run/fix performance tests:
+
+            {}
+
+            {}
+
+            {}
+            "#,
+            tech_stack,
+            application_url,
+            failures_section,
+            targets_section,
+            scenarios_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::performance_testing_action_examples(),
+            PromptBuilder::json_formatting_requirements()
         )
     }
 }

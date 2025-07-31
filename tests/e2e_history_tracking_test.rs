@@ -36,12 +36,12 @@ fn create_test_args(name: &str, idea: &str, path: &str, tech_stack: &str) -> Arg
 
 /// Helper function to analyze task and agent history in the project
 async fn analyze_project_history(project_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = project_path.join("orchy.json");
-    
-    println!("📊 Analyzing project history from: {}", config_path.display());
-    
-    let config_content = fs::read_to_string(&config_path).await?;
-    let project: Project = serde_json::from_str(&config_content)?;
+    let db_path = orchy::utils::cli::get_default_database_path();
+    let project_path_str = project_path.to_string_lossy().to_string();
+
+    println!("📊 Analyzing project history from database for: {}", project_path.display());
+
+    let project = orchy::utils::cli::load_project_from_database(&project_path_str, db_path).await?;
     
     println!("🎯 PROJECT ANALYSIS RESULTS:");
     println!("  📋 Total Tasks: {}", project.tasks.len());
@@ -161,8 +161,7 @@ async fn test_history_tracking_during_project_creation() {
             
             // Verify basic project structure
             let expected_files = vec![
-                "orchy.json",
-                "GEMINI.md", 
+                "GEMINI.md",
                 "CLAUDE.md",
             ];
             
@@ -223,12 +222,17 @@ async fn test_multiple_project_creation_history_isolation() {
     
     // Verify both projects have independent histories
     println!("🔍 Verifying history isolation...");
-    
-    let config1_content = fs::read_to_string(project1_path.join("orchy.json")).await.unwrap();
-    let project1: Project = serde_json::from_str(&config1_content).unwrap();
-    
-    let config2_content = fs::read_to_string(project2_path.join("orchy.json")).await.unwrap();
-    let project2: Project = serde_json::from_str(&config2_content).unwrap();
+
+    let db_path = orchy::utils::cli::get_default_database_path();
+    let project1 = orchy::utils::cli::load_project_from_database(
+        &project1_path.to_string_lossy(),
+        db_path.clone()
+    ).await.unwrap();
+
+    let project2 = orchy::utils::cli::load_project_from_database(
+        &project2_path.to_string_lossy(),
+        db_path
+    ).await.unwrap();
     
     // Verify projects have different IDs and independent data
     assert_ne!(project1.id, project2.id, "Projects should have different IDs");
