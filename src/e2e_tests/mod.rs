@@ -6,8 +6,6 @@
 /// 
 /// Tests verify that prompts work well for major edge cases and can recover from errors.
 
-pub mod framework;
-
 use crate::mcp::gemini::GeminiCLI;
 use crate::prompts::Prompts;
 use std::path::Path;
@@ -109,40 +107,35 @@ impl E2ETestRunner {
         let start_time = std::time::Instant::now();
         let mut stages = Vec::new();
 
-        // Stage 1: Idea Breakdown
+        // Stage 1: Idea Breakdown - Get task list from LLM
         let idea_breakdown_result = self.run_stage_with_retry(
             "Idea Breakdown",
             || self.run_idea_breakdown_stage(&app_dir, "frontend"),
         ).await?;
+        
+        // Extract the task breakdown from LLM response
+        let tasks = idea_breakdown_result.actions_executed.clone();
         stages.push(idea_breakdown_result);
 
-        // Stage 2: Feature Development
-        let feature_dev_result = self.run_stage_with_retry(
-            "Feature Development", 
-            || self.run_feature_development_stage(&app_dir, "frontend"),
-        ).await?;
-        stages.push(feature_dev_result);
+        // Execute each task dynamically based on LLM's breakdown
+        for (index, task) in tasks.iter().enumerate() {
+            let default_task_name = format!("Task {}", index + 1);
+            let task_name = task.get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or(&default_task_name);
+            
+            let agent_type = task.get("agent_type")
+                .and_then(|a| a.as_str())
+                .unwrap_or("FeatureDev");
 
-        // Stage 3: Code Review
-        let code_review_result = self.run_stage_with_retry(
-            "Code Review",
-            || self.run_code_review_stage(&app_dir),
-        ).await?;
-        stages.push(code_review_result);
+            println!("🔄 Executing LLM-defined task: {} (Agent: {})", task_name, agent_type);
 
-        // Stage 4: QA Testing
-        let qa_result = self.run_stage_with_retry(
-            "QA Testing",
-            || self.run_qa_stage(&app_dir, "frontend"),
-        ).await?;
-        stages.push(qa_result);
-
-        // Stage 5: DevOps Deployment
-        let devops_result = self.run_stage_with_retry(
-            "DevOps Deployment",
-            || self.run_devops_stage(&app_dir, "frontend"),
-        ).await?;
-        stages.push(devops_result);
+            let task_result = self.run_stage_with_retry(
+                task_name,
+                || self.run_dynamic_task(&app_dir, task, "frontend"),
+            ).await?;
+            stages.push(task_result);
+        }
 
         let total_duration = start_time.elapsed().as_millis();
         let overall_success = stages.iter().all(|s| s.success);
@@ -169,40 +162,35 @@ impl E2ETestRunner {
         let start_time = std::time::Instant::now();
         let mut stages = Vec::new();
 
-        // Stage 1: Idea Breakdown
+        // Stage 1: Idea Breakdown - Get task list from LLM
         let idea_breakdown_result = self.run_stage_with_retry(
             "Idea Breakdown",
             || self.run_idea_breakdown_stage(&app_dir, "backend"),
         ).await?;
+        
+        // Extract the task breakdown from LLM response
+        let tasks = idea_breakdown_result.actions_executed.clone();
         stages.push(idea_breakdown_result);
 
-        // Stage 2: Feature Development
-        let feature_dev_result = self.run_stage_with_retry(
-            "Feature Development",
-            || self.run_feature_development_stage(&app_dir, "backend"),
-        ).await?;
-        stages.push(feature_dev_result);
+        // Execute each task dynamically based on LLM's breakdown
+        for (index, task) in tasks.iter().enumerate() {
+            let default_task_name = format!("Task {}", index + 1);
+            let task_name = task.get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or(&default_task_name);
+            
+            let agent_type = task.get("agent_type")
+                .and_then(|a| a.as_str())
+                .unwrap_or("FeatureDev");
 
-        // Stage 3: Code Review
-        let code_review_result = self.run_stage_with_retry(
-            "Code Review",
-            || self.run_code_review_stage(&app_dir),
-        ).await?;
-        stages.push(code_review_result);
+            println!("🔄 Executing LLM-defined task: {} (Agent: {})", task_name, agent_type);
 
-        // Stage 4: QA Testing
-        let qa_result = self.run_stage_with_retry(
-            "QA Testing",
-            || self.run_qa_stage(&app_dir, "backend"),
-        ).await?;
-        stages.push(qa_result);
-
-        // Stage 5: DevOps Deployment
-        let devops_result = self.run_stage_with_retry(
-            "DevOps Deployment",
-            || self.run_devops_stage(&app_dir, "backend"),
-        ).await?;
-        stages.push(devops_result);
+            let task_result = self.run_stage_with_retry(
+                task_name,
+                || self.run_dynamic_task(&app_dir, task, "backend"),
+            ).await?;
+            stages.push(task_result);
+        }
 
         let total_duration = start_time.elapsed().as_millis();
         let overall_success = stages.iter().all(|s| s.success);

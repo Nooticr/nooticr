@@ -29,7 +29,7 @@ impl E2ETestRunner {
         app_type: &str,
     ) -> Result<StageResult, Box<dyn std::error::Error>> {
         let start_time = std::time::Instant::now();
-        let actions_executed = Vec::new();
+        let actions_executed: Vec<serde_json::Value> = Vec::new();
         let errors = Vec::new();
 
         let idea = match app_type {
@@ -58,17 +58,18 @@ impl E2ETestRunner {
         // Call Gemini with retry mechanism
         let response = self.call_gemini_with_retry(&prompt).await?;
         
-        // Parse response and extract tasks
-        let _tasks = self.parse_idea_breakdown_response(&response)?;
+        // Parse response and extract tasks - these will drive the actual pipeline
+        let tasks = self.parse_idea_breakdown_response(&response)?;
         
-        // Note: No project structure creation - the LLM should handle all setup through actions
+        // Store tasks for use by the pipeline - no hardcoded stages
+        // The pipeline should use these tasks instead of hardcoded stage sequence
 
         let duration = start_time.elapsed().as_millis();
         
         Ok(StageResult {
             stage_name: "Idea Breakdown".to_string(),
             success: true,
-            actions_executed,
+            actions_executed: tasks, // Return the actual task breakdown from LLM
             errors,
             duration_ms: duration,
             retry_count: 0,
@@ -972,6 +973,243 @@ impl E2ETestRunner {
         }
     }
 
+
+    /// Execute a dynamic task based on LLM's task breakdown specification
+    pub async fn run_dynamic_task(
+        &self,
+        app_dir: &str,
+        task: &serde_json::Value,
+        app_type: &str,
+    ) -> Result<StageResult, Box<dyn std::error::Error>> {
+        let start_time = std::time::Instant::now();
+        let mut actions_executed = Vec::new();
+        let mut errors = Vec::new();
+
+        let agent_type = task.get("agent_type")
+            .and_then(|a| a.as_str())
+            .unwrap_or("FeatureDev");
+
+        let task_title = task.get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or("Unknown Task");
+
+        println!("🤖 Running {} task: {}", agent_type, task_title);
+
+        // Route to appropriate prompt and execution based on agent_type
+        match agent_type {
+            "FeatureDev" => {
+                // Use the real feature development prompt
+                self.execute_feature_dev_task(app_dir, task, app_type, &mut actions_executed, &mut errors).await?;
+            }
+            "CodeReviewer" => {
+                // Use the real code review prompt  
+                self.execute_code_review_task(app_dir, task, &mut actions_executed, &mut errors).await?;
+            }
+            "QA" => {
+                // Use the real QA testing prompt
+                self.execute_qa_task(app_dir, task, app_type, &mut actions_executed, &mut errors).await?;
+            }
+            "DevOps" => {
+                // Use the real DevOps deployment prompt
+                self.execute_devops_task(app_dir, task, app_type, &mut actions_executed, &mut errors).await?;
+            }
+            _ => {
+                errors.push(format!("Unknown agent type: {}", agent_type));
+            }
+        }
+
+        let duration = start_time.elapsed().as_millis();
+
+        Ok(StageResult {
+            stage_name: task_title.to_string(),
+            success: errors.is_empty(),
+            actions_executed,
+            errors,
+            duration_ms: duration,
+            retry_count: 0,
+        })
+    }
+
+    /// Execute FeatureDev task using real feature development prompt
+    async fn execute_feature_dev_task(
+        &self,
+        app_dir: &str,
+        task: &serde_json::Value,
+        app_type: &str,
+        actions_executed: &mut Vec<serde_json::Value>,
+        errors: &mut Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Extract objective from task or use default
+        let app_name = Path::new(app_dir)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("myapp");
+            
+        let frontend_objective = format!("Create a Vue.js login application called '{}'. Build: 1) Complete project setup using npm create vue@latest, 2) HTML form with email/password fields, 3) Form validation, 4) Login button with click handler, 5) Authentication logic, 6) Responsive design with Tailwind CSS, 7) Error handling, 8) Success/loading states", app_name);
+        let backend_objective = format!("Create a Node.js GraphQL server called '{}'. Build: 1) Complete project setup, 2) GraphQL server with user authentication, 3) Registration and login endpoints, 4) JWT token management, 5) Password hashing, 6) Protected resolvers", app_name);
+        
+        let objective = task.get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or(match app_type {
+                "frontend" => &frontend_objective,
+                "backend" => &backend_objective,
+                _ => "Complete the assigned development task",
+            });
+
+        let tech_stack = match app_type {
+            "frontend" => "Vue 3, TypeScript, Vite, Pinia, Vue Router, Tailwind CSS",
+            "backend" => "Node.js, Express, Apollo Server, GraphQL, JWT, bcrypt, MongoDB",
+            _ => "Web technologies",
+        };
+
+        // Execute feature development - MUST continue until app actually works
+        let mut current_error: Option<String> = None;
+        
+        loop {
+            // Re-read project files for latest context
+            let updated_project_files = self.read_project_files(app_dir).await?;
+            
+            // Create prompt with current error context if any
+            let prompt_with_context = Prompts::feature_dev_todo_prompt(
+                objective,
+                tech_stack,
+                &updated_project_files,
+                current_error.as_deref(),
+            );
+
+            // Call Gemini to get development actions
+            let response = self.call_gemini_with_retry(&prompt_with_context).await?;
+            let actions = self.parse_actions_response(&response)?;
+
+            // Execute actions and check for errors
+            let (executed_actions, execution_errors) = self.execute_actions_with_validation(app_dir, &actions).await?;
+            actions_executed.extend(executed_actions);
+
+            // If there are execution errors, feed them back but continue
+            if !execution_errors.is_empty() {
+                println!("⚠️ Execution errors occurred, feeding back to LLM for correction...");
+                current_error = Some(execution_errors.join("\n"));
+                errors.extend(execution_errors);
+                continue; // Continue until resolved
+            }
+
+            // Test if the application functionality actually works
+            let functionality_test_result = self.test_application_functionality(app_dir, app_type).await?;
+
+            if functionality_test_result {
+                println!("✅ Feature Development: Implementation successful and functionality verified");
+                break; // ONLY exit when app actually works
+            } else {
+                // App doesn't work - get specific feedback and continue
+                println!("⚠️ App functionality verification failed, continuing development...");
+                
+                let build_error = self.get_last_build_error(app_dir, app_type).await.unwrap_or_else(|| 
+                    "Application functionality verification failed - missing required functionality or build/compilation errors".to_string()
+                );
+                
+                current_error = Some(build_error.clone());
+                errors.push(build_error);
+                // NO BREAK - continue until app works
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Execute CodeReviewer task using real code review prompt
+    async fn execute_code_review_task(
+        &self,
+        app_dir: &str,
+        _task: &serde_json::Value,
+        actions_executed: &mut Vec<serde_json::Value>,
+        errors: &mut Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_files = self.read_source_files(app_dir).await?;
+        let tech_stack = self.detect_tech_stack(app_dir).await?;
+        let focus_areas = vec!["code quality".to_string(), "best practices".to_string()];
+        let prompt = Prompts::code_review_agent_prompt(&tech_stack, &source_files, &focus_areas);
+
+        let response = self.call_gemini_with_retry(&prompt).await?;
+        let actions = self.parse_actions_response(&response)?;
+
+        let (executed_actions, execution_errors) = self.execute_actions_with_validation(app_dir, &actions).await?;
+        actions_executed.extend(executed_actions);
+        errors.extend(execution_errors);
+
+        Ok(())
+    }
+
+    /// Execute QA task using real QA testing prompt
+    async fn execute_qa_task(
+        &self,
+        app_dir: &str,
+        _task: &serde_json::Value,
+        app_type: &str,
+        actions_executed: &mut Vec<serde_json::Value>,
+        errors: &mut Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let tech_stack = self.detect_tech_stack(app_dir).await?;
+        let application_files = self.read_project_files(app_dir).await?;
+
+        let test_types = match app_type {
+            "frontend" => vec![
+                "Unit tests for components".to_string(),
+                "Integration tests for API calls".to_string(),
+                "E2E tests for user flows".to_string(),
+            ],
+            "backend" => vec![
+                "Unit tests for resolvers".to_string(),
+                "Integration tests for database".to_string(),
+                "API endpoint tests".to_string(),
+            ],
+            _ => vec!["Basic functionality tests".to_string()],
+        };
+
+        // Run different types of QA testing
+        for test_type in &test_types {
+            let qa_prompt = if test_type.contains("Unit") {
+                Prompts::unit_testing_prompt(&tech_stack, &application_files, "vitest", &[], None)
+            } else if test_type.contains("Integration") {
+                Prompts::integration_testing_prompt(&tech_stack, &application_files, "vitest", &test_types, None)
+            } else {
+                Prompts::qa_agent_prompt(&tech_stack, &application_files, &test_types, None)
+            };
+
+            let response = self.call_gemini_with_retry(&qa_prompt).await?;
+            let qa_actions = self.parse_actions_response(&response)?;
+
+            let (executed_actions, execution_errors) = self.execute_actions_with_validation(app_dir, &qa_actions).await?;
+            actions_executed.extend(executed_actions);
+            errors.extend(execution_errors);
+        }
+
+        Ok(())
+    }
+
+    /// Execute DevOps task using real DevOps deployment prompt
+    async fn execute_devops_task(
+        &self,
+        app_dir: &str,
+        _task: &serde_json::Value,
+        app_type: &str,
+        actions_executed: &mut Vec<serde_json::Value>,
+        errors: &mut Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let tech_stack = self.detect_tech_stack(app_dir).await?;
+        let project_files = self.read_project_files(app_dir).await?;
+
+        let deployment_target = "Vercel"; // Use single target as required by prompt
+        let prompt = Prompts::devops_agent_prompt(&tech_stack, &project_files, deployment_target, None);
+
+        let response = self.call_gemini_with_retry(&prompt).await?;
+        let devops_actions = self.parse_actions_response(&response)?;
+
+        let (executed_actions, execution_errors) = self.execute_actions_with_validation(app_dir, &devops_actions).await?;
+        actions_executed.extend(executed_actions);
+        errors.extend(execution_errors);
+
+        Ok(())
+    }
 
     /// Get build error context (framework doesn't run commands - this should come from LLM actions)
     async fn get_last_build_error(&self, _app_dir: &str, _app_type: &str) -> Option<String> {

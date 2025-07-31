@@ -138,6 +138,14 @@ CURRENT CODEBASE:
 - Fix errors immediately before proceeding
 - Create complete, working code (no TODOs or placeholders)
 
+🚀 PROJECT SETUP GUIDELINES:
+- If incomplete setup exists: Clear problematic files first, then use proper scaffolding
+- If no package.json exists: Use proper scaffolding commands (npm create vue@latest, npm create react-app, etc. always in non intereactive mode)
+- ALWAYS use non-interactive, look for latest versions, and avoid deprecated methods, go to official documentation to see actual commands
+- After scaffolding: Run `npm install` to ensure dependencies are installed
+- Only create individual files AFTER proper project scaffolding is complete
+- If stuck in file creation loop: Stop, use RunCommand with proper scaffolding instead
+
 {}
 
 {}
