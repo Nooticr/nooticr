@@ -78,13 +78,37 @@ impl PromptBuilder {
 
     /// Common JSON formatting requirements section
     pub fn json_formatting_requirements() -> &'static str {
-        r#"CRITICAL JSON FORMATTING REQUIREMENTS:
-            - Return ONLY a valid JSON array of actions, no other text
-            - Escape all special characters in strings (quotes, backslashes, newlines)
-            - Use \\n for newlines, \\" for quotes, \\\\ for backslashes in content
-            - Ensure all braces and brackets are properly matched
-            - Do not include any comments or explanations outside the JSON
-            - Validate that your JSON can be parsed by standard JSON parsers"#
+        r#"🚨 CRITICAL JSON-ONLY RESPONSE REQUIREMENTS 🚨
+
+⚠️ ABSOLUTELY NO TEXT OUTSIDE OF JSON ⚠️
+⚠️ DO NOT START WITH EXPLANATIONS ⚠️  
+⚠️ DO NOT END WITH SUMMARIES ⚠️
+⚠️ NO "Here are the actions:" OR SIMILAR TEXT ⚠️
+
+YOUR RESPONSE MUST:
+✅ Start immediately with [ (opening bracket)
+✅ End immediately with ] (closing bracket)  
+✅ Contain ONLY valid JSON array of actions
+✅ Use proper JSON escaping: \\n for newlines, \\" for quotes, \\\\ for backslashes
+✅ Have all braces and brackets properly matched
+
+❌ NEVER include text like:
+❌ "Here are the actions to complete this task:"
+❌ "The following JSON actions will..."  
+❌ "I'll create these files:"
+❌ "Summary: The above actions will..."
+
+EXAMPLE CORRECT FORMAT:
+[
+    {
+        "Write": {
+            "path": "src/App.vue",
+            "content": "<template>\\n  <div>Hello</div>\\n</template>"
+        }
+    }
+]
+
+⚠️ FAILURE TO FOLLOW THIS FORMAT WILL CAUSE SYSTEM ERRORS ⚠️"#
     }
 
     /// Common implementation guidelines section
