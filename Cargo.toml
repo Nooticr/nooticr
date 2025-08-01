@@ -30,19 +30,3 @@ tokio-retry = "0.3"
 
 [dev-dependencies]
 tempfile = "3.20.0"
-
-[[bin]]
-name = "verify_file_creation"
-path = "verify_file_creation.rs"
-
-[[bin]]
-name = "debug_vue_generation"
-path = "debug_vue_generation.rs"
-
-[[bin]]
-name = "e2e_prompt_calibration"
-path = "src/bin/e2e_prompt_calibration.rs"
-
-[[bin]]
-name = "e2e_pipeline_test"
-path = "src/bin/e2e_pipeline_test.rs"
