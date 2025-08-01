@@ -161,33 +161,65 @@ impl GeminiCLI {
         Self::query_with_model(prompt, "gemini-2.5-flash").await
     }
 
-    /// Send a query with specific model selection
+    /// Send a query with specific model selection and retry logic
     pub async fn query_with_model(prompt: &str, model: &str) -> Result<String> {
-        let mut command = Command::new("gemini");
-        
-        // Ensure GEMINI_API_KEY is set from environment
-        if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
-            command.env("GEMINI_API_KEY", api_key);
-        }
-        
-        let output = command
-            .args(&["gen", "-m", model, "-p", prompt])
-            .output()
-            .await
-            .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
+        Self::query_with_model_and_retries(prompt, model, 3).await
+    }
 
-        if !output.status.success() {
+    /// Send a query with specific model selection and configurable retry logic
+    pub async fn query_with_model_and_retries(prompt: &str, model: &str, max_retries: u32) -> Result<String> {
+        let mut last_error = None;
+
+        for attempt in 1..=max_retries {
+            tracing::debug!("🤖 Gemini API attempt {}/{}", attempt, max_retries);
+
+            let mut command = Command::new("gemini");
+
+            // Ensure GEMINI_API_KEY is set from environment
+            if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
+                command.env("GEMINI_API_KEY", api_key);
+            }
+
+            let output = command
+                .args(&["gen", "-m", model, "-p", prompt])
+                .output()
+                .await
+                .map_err(|e| OrchestratorError::internal(format!("Failed to run Gemini CLI: {}", e)))?;
+
+            if output.status.success() {
+                let response = String::from_utf8_lossy(&output.stdout);
+                tracing::debug!("✅ Gemini API success on attempt {}", attempt);
+                return Ok(response.to_string());
+            }
+
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(OrchestratorError::internal(format!(
-                "Gemini CLI failed: stderr: {}, stdout: {}",
-                stderr,
-                stdout
-            )));
+            let error_msg = format!("Gemini CLI failed: stderr: {}, stdout: {}", stderr, stdout);
+
+            // Check if this is a retryable error
+            let is_retryable = stderr.contains("INTERNAL") ||
+                              stderr.contains("500") ||
+                              stderr.contains("timeout") ||
+                              stderr.contains("rate limit") ||
+                              stderr.contains("temporarily unavailable");
+
+            if !is_retryable || attempt == max_retries {
+                tracing::error!("❌ Gemini API failed on attempt {}: {}", attempt, error_msg);
+                return Err(OrchestratorError::internal(error_msg));
+            }
+
+            tracing::warn!("⚠️  Gemini API retryable error on attempt {}: {}", attempt, error_msg);
+            last_error = Some(error_msg);
+
+            // Exponential backoff: 1s, 2s, 4s, etc.
+            let delay_seconds = 2_u64.pow(attempt - 1);
+            tracing::info!("⏳ Retrying in {}s...", delay_seconds);
+            tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds)).await;
         }
 
-        let response = String::from_utf8_lossy(&output.stdout);
-        Ok(response.to_string())
+        Err(OrchestratorError::internal(
+            last_error.unwrap_or_else(|| "All retry attempts failed".to_string())
+        ))
     }
 
     /// Send a query expecting JSON response using the preferred model (gemini-2.5-flash)

@@ -17,18 +17,18 @@ impl Prompts {
             CONTEXT: {}
             AVAILABLE AGENTS: {:?}
 
-            OBJECTIVE: Create a working MVP that can be shipped to production
+            OBJECTIVE: Create a complete, production-ready application with full functionality
 
-            SIMPLE 4-STAGE PIPELINE:
+            COMPREHENSIVE 4-STAGE PIPELINE:
 
-            🔧 **STAGE 1: FEATURE DEVELOPMENT (MVP)**
+            🔧 **STAGE 1: COMPLETE FEATURE DEVELOPMENT**
             - Agent: FeatureDev
-            - Goal: Build the core functionality and make it work
-            - Breaks work into 8-12 dependent todos
-            - After each todo: verify `npm run dev` works (fix errors if any)
-            - After each todo: verify tests pass (fix failing tests)
-            - Only moves to next todo when everything works
-            - Produces working, testable code
+            - Goal: Build ALL core functionality with complete implementations
+            - Breaks work into 8-12 dependent todos covering entire feature set
+            - After each todo: verify application builds and runs (fix errors if any)
+            - After each todo: verify comprehensive tests pass (fix failing tests)
+            - Only moves to next todo when current feature is fully complete
+            - Produces production-ready, fully-tested code with no placeholders
 
             🔍 **STAGE 2: CODE REVIEW**
             - Agent: CodeReviewer
@@ -85,42 +85,116 @@ impl Prompts {
         )
     }
 
-    /// Feature Development Agent Prompt - Breaks work into todos and ensures everything works
+    /// Feature Development Agent Prompt - Technology-specific prompts for better results
     pub fn feature_dev_todo_prompt(
         objective: &str,
         tech_stack: &str,
         existing_files: &[(String, String)],
         current_error: Option<&str>,
+        agent_context: Option<&str>,
+    ) -> String {
+        // Route to technology-specific prompts for better results
+        if tech_stack.to_lowercase().contains("rust") {
+            Self::feature_dev_rust_prompt(objective, existing_files, current_error, agent_context)
+        } else if tech_stack.to_lowercase().contains("node") || tech_stack.to_lowercase().contains("react") {
+            Self::feature_dev_node_prompt(objective, existing_files, current_error, agent_context)
+        } else if tech_stack.to_lowercase().contains("python") {
+            Self::feature_dev_python_prompt(objective, existing_files, current_error, agent_context)
+        } else {
+            Self::feature_dev_generic_prompt(objective, tech_stack, existing_files, current_error, agent_context)
+        }
+    }
+
+    /// Rust-specific Feature Development Prompt with cargo examples
+    pub fn feature_dev_rust_prompt(
+        objective: &str,
+        existing_files: &[(String, String)],
+        current_error: Option<&str>,
+        agent_context: Option<&str>,
     ) -> String {
         use crate::prompts::common::PromptBuilder;
 
         let files_section = PromptBuilder::format_files_section(existing_files, Some(1000));
         let error_section = if let Some(error) = current_error {
-            format!("CURRENT ERROR TO FIX:\n```\n{}\n```\n", error)
+            format!("🚨 CURRENT ERROR TO FIX:\n```\n{}\n```\n", error)
         } else {
             "No current errors - proceeding with development.".to_string()
         };
 
-        format!(
-            r#"🤖 FEATUREDEV AGENT - JSON-ONLY RESPONSE MODE 🤖
+        let agent_context_section = if let Some(context) = agent_context {
+            format!("🤖 RUST BACKEND ENGINEER CONTEXT:\n{}\n\n", context)
+        } else {
+            String::new()
+        };
 
-OBJECTIVE: {}
-TECH STACK: {}
+        format!(
+            r#"🦀 RUST BACKEND ENGINEER - CARGO PROJECT SETUP REQUIRED 🦀
+
+{}🎯 OBJECTIVE: {}
 
 {}
 
 CURRENT CODEBASE:
 {}
 
-🔧 YOUR DEVELOPMENT WORKFLOW:
-1. If this is your first iteration: Break the objective into 8-12 small, dependent todos
-2. If continuing work: Look at existing code and continue with remaining todos
-3. Work on ONE todo at a time, but COMPLETE ALL TODOS before finishing
-4. After each todo, verify build/dev works (fix errors if any)
-5. After each todo, verify tests pass (fix failing tests)
-6. Only proceed to next todo when current todo works completely
-7. If errors occur, create actions to fix them immediately
-8. ⚠️ CRITICAL: Complete ALL your todos - don't stop after just one!
+🚨 MANDATORY RUST PROJECT SETUP - FOLLOW OFFICIAL CARGO DOCUMENTATION 🚨
+
+⚠️ YOU MUST START WITH PROPER CARGO PROJECT SETUP:
+1. FIRST ACTION: Use "cargo new project-name" or "cargo init"
+2. SECOND ACTION: Configure Cargo.toml with ALL dependencies
+3. THIRD ACTION: Create proper src/main.rs or src/lib.rs
+4. THEN: Build complete application with proper module structure
+
+🔧 RUST-SPECIFIC DEVELOPMENT WORKFLOW:
+
+🚨 CRITICAL: YOU MUST GENERATE ALL 8 TODOS IN ONE RESPONSE 🚨
+
+⚠️ DO NOT GENERATE JUST ONE TODO - GENERATE ALL 8 TODOS WITH ALL ACTIONS ⚠️
+
+YOU MUST RETURN A JSON ARRAY WITH ALL 8 TODOS:
+
+TODO 1: Project Setup & Installation
+- RunCommand: cargo new todo-api
+- Write: Cargo.toml with dependencies
+- RunCommand: cargo check
+
+TODO 2: Basic Server Structure
+- Write: src/main.rs with Actix-web server
+- RunCommand: cargo check
+
+TODO 3: Database Models & Connection
+- Write: src/models.rs with User and Todo structs
+- Write: src/database.rs with SQLite connection
+- RunCommand: cargo check
+
+TODO 4: User Authentication
+- Write: src/auth.rs with JWT authentication
+- RunCommand: cargo check
+
+TODO 5: API Handlers & Endpoints
+- Write: src/handlers.rs with all CRUD endpoints
+- RunCommand: cargo check
+
+TODO 6: Database Migrations
+- Write: migrations/001_initial.sql with schema
+- RunCommand: cargo check
+
+TODO 7: Integration Tests
+- Write: tests/integration_tests.rs with API tests
+- RunCommand: cargo test
+
+TODO 8: Final Integration & Testing
+- Write: src/lib.rs with module declarations
+- RunCommand: cargo check
+- RunCommand: cargo test
+- RunCommand: cargo build
+
+🚨 CRITICAL REQUIREMENTS 🚨
+- GENERATE ALL 8 TODOS IN ONE RESPONSE
+- EACH TODO MUST HAVE MULTIPLE ACTIONS
+- INCLUDE BOTH RunCommand AND Write ACTIONS
+- NO STOPPING AFTER FIRST TODO
+- COMPLETE JSON ARRAY WITH ALL TODOS
 
 ⚠️ CRITICAL: FOR DEVELOPMENT SERVER COMMANDS:
 - NEVER run blocking commands like `npm run dev`, `cargo run`, `python manage.py runserver`
@@ -131,12 +205,27 @@ CURRENT CODEBASE:
   - Node.js: Use `node --check` for validation
 - If you must test a server, use: `timeout 10s npm run dev` or background it with `npm run dev > dev.log 2>&1 &`
 
-📋 DEVELOPMENT RULES:
-- Focus on making things WORK, not perfect code
-- Each todo should be completable in 1-2 hours
-- Always verify functionality after each step
-- Fix errors immediately before proceeding
-- Create complete, working code (no TODOs or placeholders)
+🚨 CRITICAL: YOUR RESPONSE MUST BE A COMPLETE JSON ARRAY 🚨
+
+⚠️ DO NOT STOP AFTER ONE TODO - GENERATE ALL 8 TODOS ⚠️
+
+YOUR RESPONSE MUST BE A JSON ARRAY WITH ALL 8 TODOS:
+- TODO 1: Project Setup & Installation
+- TODO 2: Basic Server Structure
+- TODO 3: Database Models & Connection
+- TODO 4: User Authentication
+- TODO 5: API Handlers & Endpoints
+- TODO 6: Database Migrations
+- TODO 7: Integration Tests
+- TODO 8: Final Integration & Testing
+
+🚨 EACH TODO MUST HAVE MULTIPLE ACTIONS 🚨
+- RunCommand actions for cargo commands
+- Write actions for creating files
+- Verification commands at the end
+- Complete file contents (no placeholders)
+
+🚨 FAILURE TO GENERATE ALL 8 TODOS = REJECTION 🚨
 
 🚀 PROJECT SETUP GUIDELINES:
 - If incomplete setup exists: Clear problematic files first, then use proper scaffolding
@@ -149,6 +238,14 @@ CURRENT CODEBASE:
 {}
 
 {}
+
+🚨🚨🚨 FINAL WARNING 🚨🚨🚨
+YOU MUST GENERATE ALL 8 TODOS IN ONE RESPONSE
+DO NOT GENERATE JUST ONE TODO AND STOP
+YOUR RESPONSE MUST BE A COMPLETE JSON ARRAY WITH ALL 8 TODOS
+EACH TODO MUST HAVE MULTIPLE ACTIONS (RunCommand + Write + Verification)
+FAILURE TO DO THIS WILL RESULT IN REJECTION
+🚨🚨🚨 GENERATE ALL 8 TODOS NOW 🚨🚨🚨
 
 🚨 CRITICAL RESPONSE FORMAT 🚨
 
@@ -172,15 +269,239 @@ DO NOT WRITE:
 
 WRITE ONLY:
 ✅ [{{ "Write": {{ "path": "src/App.vue", "content": "..." }} }}]
+            "#,
+            agent_context_section,
+            objective,
+            error_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// Node.js/React-specific Feature Development Prompt
+    pub fn feature_dev_node_prompt(
+        objective: &str,
+        existing_files: &[(String, String)],
+        current_error: Option<&str>,
+        agent_context: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(existing_files, Some(1000));
+        let error_section = if let Some(error) = current_error {
+            format!("🚨 CURRENT ERROR TO FIX:\n```\n{}\n```\n", error)
+        } else {
+            "No current errors - proceeding with development.".to_string()
+        };
+
+        let agent_context_section = if let Some(context) = agent_context {
+            format!("🤖 NODE.JS/REACT ENGINEER CONTEXT:\n{}\n\n", context)
+        } else {
+            String::new()
+        };
+
+        format!(
+            r#"⚛️ NODE.JS/REACT ENGINEER - NPM PROJECT SETUP REQUIRED ⚛️
+
+{}🎯 OBJECTIVE: {}
+
+{}
+
+CURRENT CODEBASE:
+{}
+
+🚨 MANDATORY NODE.JS PROJECT SETUP - FOLLOW OFFICIAL NPM/REACT DOCUMENTATION 🚨
+
+⚠️ YOU MUST START WITH PROPER NPM PROJECT SETUP:
+1. FIRST ACTION: Use "npm init" or "npx create-react-app project-name"
+2. SECOND ACTION: Configure package.json with ALL dependencies
+3. THIRD ACTION: Create proper src/index.js or src/App.js
+4. THEN: Build complete application with proper component structure
+
+📋 NODE.JS PROJECT STRUCTURE EXAMPLES - FOLLOW EXACTLY:
+
+🚨 EXAMPLE: PROPER NPM PROJECT SETUP 🚨
+[
+    {{
+        "RunCommand": {{
+            "command": "npm init -y",
+            "env": []
+        }}
+    }},
+    {{
+        "Write": {{
+            "path": "package.json",
+            "content": "{{\n  \"name\": \"todo-api\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {{\n    \"dev\": \"node server.js\",\n    \"test\": \"jest\",\n    \"build\": \"webpack --mode production\"\n  }},\n  \"dependencies\": {{\n    \"express\": \"^4.18.0\",\n    \"jsonwebtoken\": \"^9.0.0\",\n    \"bcrypt\": \"^5.1.0\"\n  }}\n}}"
+        }}
+    }},
+    {{
+        "RunCommand": {{
+            "command": "npm install",
+            "env": []
+        }}
+    }}
+]
+
+🚨 MANDATORY NODE.JS FILES TO GENERATE 🚨
+- package.json (with ALL dependencies and scripts)
+- server.js (complete Express server)
+- routes/auth.js (authentication routes)
+- routes/todos.js (todo CRUD routes)
+- models/User.js (user model)
+- models/Todo.js (todo model)
+- tests/api.test.js (API tests)
+
+{}
 
 {}
             "#,
+            agent_context_section,
+            objective,
+            error_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// Python-specific Feature Development Prompt
+    pub fn feature_dev_python_prompt(
+        objective: &str,
+        existing_files: &[(String, String)],
+        current_error: Option<&str>,
+        agent_context: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(existing_files, Some(1000));
+        let error_section = if let Some(error) = current_error {
+            format!("🚨 CURRENT ERROR TO FIX:\n```\n{}\n```\n", error)
+        } else {
+            "No current errors - proceeding with development.".to_string()
+        };
+
+        let agent_context_section = if let Some(context) = agent_context {
+            format!("🤖 PYTHON ENGINEER CONTEXT:\n{}\n\n", context)
+        } else {
+            String::new()
+        };
+
+        format!(
+            r#"🐍 PYTHON ENGINEER - VIRTUAL ENV & PIP SETUP REQUIRED 🐍
+
+{}🎯 OBJECTIVE: {}
+
+{}
+
+CURRENT CODEBASE:
+{}
+
+🚨 MANDATORY PYTHON PROJECT SETUP - FOLLOW OFFICIAL PYTHON DOCUMENTATION 🚨
+
+⚠️ YOU MUST START WITH PROPER PYTHON PROJECT SETUP:
+1. FIRST ACTION: Use "python -m venv venv" to create virtual environment
+2. SECOND ACTION: Create requirements.txt with ALL dependencies
+3. THIRD ACTION: Create proper app.py or main.py
+4. THEN: Build complete application with proper module structure
+
+📋 PYTHON PROJECT STRUCTURE EXAMPLES - FOLLOW EXACTLY:
+
+🚨 EXAMPLE: PROPER PYTHON PROJECT SETUP 🚨
+[
+    {{
+        "RunCommand": {{
+            "command": "python -m venv venv",
+            "env": []
+        }}
+    }},
+    {{
+        "Write": {{
+            "path": "requirements.txt",
+            "content": "flask==2.3.0\\nflask-sqlalchemy==3.0.0\\nflask-jwt-extended==4.5.0\\nbcrypt==4.0.0\\npytest==7.4.0"
+        }}
+    }},
+    {{
+        "RunCommand": {{
+            "command": "pip install -r requirements.txt",
+            "env": []
+        }}
+    }}
+]
+
+🚨 MANDATORY PYTHON FILES TO GENERATE 🚨
+- requirements.txt (with ALL dependencies)
+- app.py (complete Flask application)
+- models.py (User, Todo models)
+- auth.py (JWT authentication)
+- routes.py (API endpoints)
+- tests/test_api.py (API tests)
+
+{}
+
+{}
+            "#,
+            agent_context_section,
+            objective,
+            error_section,
+            files_section,
+            PromptBuilder::AVAILABLE_ACTIONS,
+            PromptBuilder::json_formatting_requirements()
+        )
+    }
+
+    /// Generic Feature Development Prompt (fallback)
+    pub fn feature_dev_generic_prompt(
+        objective: &str,
+        tech_stack: &str,
+        existing_files: &[(String, String)],
+        current_error: Option<&str>,
+        agent_context: Option<&str>,
+    ) -> String {
+        use crate::prompts::common::PromptBuilder;
+
+        let files_section = PromptBuilder::format_files_section(existing_files, Some(1000));
+        let error_section = if let Some(error) = current_error {
+            format!("🚨 CURRENT ERROR TO FIX:\n```\n{}\n```\n", error)
+        } else {
+            "No current errors - proceeding with development.".to_string()
+        };
+
+        let agent_context_section = if let Some(context) = agent_context {
+            format!("🤖 AGENT CONTEXT:\n{}\n\n", context)
+        } else {
+            String::new()
+        };
+
+        format!(
+            r#"🤖 FEATURE DEVELOPMENT AGENT - FOLLOW OFFICIAL DOCUMENTATION 🤖
+
+{}🎯 OBJECTIVE: {}
+TECH STACK: {}
+
+{}
+
+CURRENT CODEBASE:
+{}
+
+🚨 MANDATORY: FOLLOW OFFICIAL DOCUMENTATION FOR YOUR TECH STACK 🚨
+
+⚠️ YOU MUST START WITH PROPER PROJECT SETUP:
+1. Use official scaffolding commands for your technology
+2. Create proper configuration files
+3. Set up proper project structure
+4. Generate complete, working application
+
+{}
+
+{}
+            "#,
+            agent_context_section,
             objective,
             tech_stack,
             error_section,
             files_section,
             PromptBuilder::AVAILABLE_ACTIONS,
-            PromptBuilder::feature_dev_action_examples(),
             PromptBuilder::json_formatting_requirements()
         )
     }
@@ -190,6 +511,7 @@ WRITE ONLY:
         tech_stack: &str,
         files_to_review: &[(String, String)],
         focus_areas: &[String],
+        agent_context: Option<&str>,
     ) -> String {
         use crate::prompts::common::PromptBuilder;
 
@@ -215,20 +537,32 @@ REVIEW FOCUS AREAS:
 CODE TO REVIEW:
 {}
 
-📝 YOUR REVIEW CRITERIA (RESPOND ONLY WITH JSON ACTIONS):
-1. **DRY Violations**: Look for repeated code that should be extracted
-2. **Code Practices**: Follow language/framework best practices
-3. **Maintainability**: Code should be easy to understand and modify
-4. **Separation of Concerns**: Clear responsibility boundaries
-5. **Readability**: Code should be self-documenting with clear names
-6. **Error Handling**: Proper error handling and edge cases
-7. **Performance**: Obvious performance issues or anti-patterns
+🚨 CRITICAL CODE REVIEW VALIDATION 🚨
 
-⚡ YOUR REVIEW PROCESS (RESPOND ONLY WITH JSON ACTIONS):
-1. Identify code quality issues (DRY violations, bad practices, etc.)
-2. Create specific file modification actions to fix each issue
-3. Ensure actions improve maintainability and readability
-4. Focus on the most critical issues first
+⛔ REJECT IMMEDIATELY IF:
+- Missing essential project files (Cargo.toml, package.json, etc.)
+- Code has syntax errors or won't compile
+- Placeholder/stub code without real implementation
+- Missing core functionality that was supposed to be implemented
+- Security vulnerabilities (hardcoded secrets, SQL injection, etc.)
+- No error handling for critical operations
+- Broken imports or missing dependencies
+
+📝 YOUR REVIEW CRITERIA (STRICT ENFORCEMENT):
+1. **Code Completeness**: All required functionality must be implemented
+2. **Compilation**: Code must compile without errors
+3. **Security**: No security vulnerabilities allowed
+4. **Error Handling**: Proper error handling for all operations
+5. **Best Practices**: Follow language/framework standards
+6. **Maintainability**: Code must be production-ready
+7. **Performance**: No obvious performance anti-patterns
+
+⚡ YOUR REVIEW PROCESS (CRITICAL VALIDATION):
+1. FIRST: Check if code is complete and functional
+2. IF INCOMPLETE/BROKEN: Return rejection with specific blocking issues
+3. IF FUNCTIONAL: Perform detailed code quality review
+4. Create specific actions to fix critical issues
+5. Ensure all changes maintain functionality
 
 {}
 
@@ -236,9 +570,15 @@ CODE TO REVIEW:
 
 🚨🚨🚨 MANDATORY JSON RESPONSE FORMAT 🚨🚨🚨
 
+FOR INCOMPLETE/BROKEN CODE - REJECTION FORMAT:
+❌ [{{ "Reject": {{ "reason": "Code doesn't compile - syntax errors in main.rs", "blocking_issues": ["Missing dependencies", "Syntax errors", "Incomplete implementation"] }} }}]
+
+FOR WORKING CODE - REVIEW FORMAT:
+✅ [{{ "Replace": {{ "path": "src/utils.js", "old_content": "...", "new_content": "..." }} }}]
+
 ⛔ SYSTEM WILL CRASH IF YOU WRITE:
 ⛔ Any credential messages
-⛔ "After reviewing..." 
+⛔ "After reviewing..."
 ⛔ "I found..."
 ⛔ "Here are..."
 ⛔ Any text before [
@@ -247,17 +587,6 @@ CODE TO REVIEW:
 ✅ REQUIRED FORMAT: Start typing [ immediately
 ✅ End typing ] immediately
 ✅ Nothing else allowed
-
-EXAMPLE RESPONSE (COPY THIS FORMAT EXACTLY):
-[
-  {{
-    "Replace": {{
-      "path": "src/utils.js", 
-      "old_content": "function helper1() {{ return 'a'; }}\\nfunction helper2() {{ return 'a'; }}",
-      "new_content": "function commonHelper() {{ return 'a'; }}\\nconst helper1 = commonHelper;\\nconst helper2 = commonHelper;"
-    }}
-  }}
-]
 
 🚨 START YOUR RESPONSE WITH [ RIGHT NOW - NO OTHER TEXT 🚨
 
@@ -278,6 +607,7 @@ EXAMPLE RESPONSE (COPY THIS FORMAT EXACTLY):
         application_files: &[(String, String)],
         test_types: &[String],
         current_test_failures: Option<&str>,
+        agent_context: Option<&str>,
     ) -> String {
         use crate::prompts::common::PromptBuilder;
 
@@ -290,7 +620,7 @@ EXAMPLE RESPONSE (COPY THIS FORMAT EXACTLY):
         };
 
         format!(
-            r#"🧪 QA AGENT - JSON-ONLY RESPONSE MODE 🧪
+            r#"🧪 QA AGENT - CRITICAL VALIDATION MODE 🧪
 
 TECH STACK: {}
 
@@ -302,35 +632,55 @@ TEST TYPES TO IMPLEMENT:
 APPLICATION CODE:
 {}
 
-🔄 YOUR QA WORKFLOW:
-1. Break QA work into todos for each test type
-2. Implement/run each test type systematically
-3. Verify all tests pass with no errors
-4. Check for regressions in existing functionality
-5. Validate performance and user experience
-6. Fix any issues found before proceeding
+🚨 CRITICAL QA VALIDATION REQUIREMENTS 🚨
 
-🎯 QA FOCUS AREAS:
-- **Unit Tests**: Test individual functions and components
-- **Integration Tests**: Test component interactions
-- **UI Tests**: Test user interface and interactions
-- **Performance Tests**: Check load times and responsiveness
-- **Regression Tests**: Ensure existing features still work
-- **Error Handling**: Test edge cases and error scenarios
+⛔ REJECT IMMEDIATELY IF:
+- Missing essential files (Cargo.toml, main.rs/lib.rs for Rust projects)
+- Code doesn't compile or has syntax errors
+- No actual functionality implemented (just placeholder code)
+- Missing core dependencies in package files
+- Incomplete or broken implementations
+- No proper error handling
+- Security vulnerabilities present
 
-✅ QA RULES:
-- All tests must pass with no errors
-- Fix failing tests immediately
-- Create comprehensive test coverage
-- Validate both happy path and edge cases
-- Ensure no regressions in existing functionality
+🔍 MANDATORY PRE-TESTING VALIDATION:
+1. **Code Completeness Check**: Verify all essential files exist
+2. **Compilation Check**: Code must compile without errors
+3. **Functionality Check**: Core features must be implemented (not just stubs)
+4. **Dependency Check**: All required dependencies must be properly configured
+5. **Security Check**: No obvious security vulnerabilities
 
-⚡ YOUR QA PROCESS:
-1. Create actions to write/update test files
-2. Create actions to run tests and capture results
-3. If tests fail, create actions to fix the failures
-4. Create actions to verify no regressions
-5. Repeat until all tests pass
+🎯 QA FOCUS AREAS (ONLY IF CODE PASSES VALIDATION):
+- **Build Validation**: Code must compile without errors
+- **Unit Tests**: Test individual functions and components - MUST PASS
+- **Integration Tests**: Test component interactions - MUST PASS
+- **API Tests**: Test all endpoints and data flow - MUST PASS
+- **Database Tests**: Test database operations and migrations - MUST PASS
+- **Error Handling Tests**: Test edge cases and error scenarios - MUST PASS
+- **Security Tests**: Test authentication and authorization - MUST PASS
+- **Performance Tests**: Basic performance validation - MUST PASS
+
+✅ QA RULES - STRICT ENFORCEMENT:
+- REJECT incomplete or non-functional code immediately
+- ALL code must compile and run before testing
+- Create comprehensive test coverage ONLY for working code
+- Report specific issues that prevent testing
+- Do NOT create tests for broken/incomplete code
+
+⚡ YOUR QA PROCESS - COMPREHENSIVE TESTING:
+1. FIRST: Validate code completeness and functionality
+2. IF CODE IS INCOMPLETE/BROKEN: Return rejection with specific issues
+3. IF CODE IS COMPLETE: Run comprehensive test validation
+4. MANDATORY TEST EXECUTION:
+   - Run `cargo check` - MUST pass
+   - Run `cargo test` - ALL tests MUST pass
+   - Run integration tests - MUST pass
+   - Test API endpoints - MUST respond correctly
+   - Test database operations - MUST work
+   - Test error scenarios - MUST handle gracefully
+5. IF ANY TESTS FAIL: Return rejection with specific test failures
+6. IF ALL TESTS PASS: Create additional test coverage if needed
+7. Report comprehensive test results
 
 {}
 
@@ -340,14 +690,17 @@ APPLICATION CODE:
 
 You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
 
+FOR INCOMPLETE/BROKEN CODE - REJECTION FORMAT:
+❌ [{{ "Reject": {{ "reason": "Missing essential files: Cargo.toml not found", "blocking_issues": ["No build configuration", "Missing main.rs", "No dependencies defined"] }} }}]
+
+FOR WORKING CODE - TESTING FORMAT:
+✅ [{{ "Write": {{ "path": "tests/unit/App.test.js", "content": "..." }} }}]
+
 DO NOT WRITE:
 ❌ "I'll create tests for..."
 ❌ "The test suite will include..."
 ❌ "QA analysis shows..."
 ❌ Any test reports or explanations
-
-WRITE ONLY:
-✅ [{{ "Write": {{ "path": "tests/unit/App.test.js", "content": "..." }} }}]
 
 {}
             "#,
@@ -367,6 +720,7 @@ WRITE ONLY:
         project_files: &[(String, String)],
         deployment_target: &str,
         ci_failures: Option<&str>,
+        agent_context: Option<&str>,
     ) -> String {
         use crate::prompts::common::PromptBuilder;
 
@@ -388,36 +742,52 @@ DEPLOYMENT TARGET: {}
 PROJECT STRUCTURE:
 {}
 
-⚙️ YOUR DEVOPS WORKFLOW:
-1. Set up CI/CD pipeline configuration
-2. Ensure build process works correctly
+🚨 CRITICAL DEVOPS VALIDATION 🚨
+
+⛔ REJECT DEPLOYMENT IF:
+- Project doesn't have proper build configuration (Cargo.toml, package.json, etc.)
+- Code doesn't compile or has build errors
+- Missing essential application files
+- No tests exist or tests are failing
+- Security vulnerabilities in dependencies
+- Missing environment configuration
+- Incomplete or placeholder implementations
+
+🔍 MANDATORY PRE-DEPLOYMENT VALIDATION:
+1. **Build Validation**: Project must build successfully
+2. **Test Validation**: All tests must pass
+3. **Security Scan**: No known vulnerabilities in dependencies
+4. **Configuration Check**: All required configs must be present
+5. **Functionality Check**: Core features must be working
+
+⚙️ YOUR DEVOPS WORKFLOW (ONLY FOR VALID PROJECTS):
+1. Validate project is deployment-ready
+2. Set up CI/CD pipeline configuration
 3. Configure automated testing in CI
 4. Set up deployment automation
-5. Fix any CI/CD failures immediately
-6. Validate deployment works end-to-end
+5. Validate deployment works end-to-end
 
 🎯 DEVOPS FOCUS AREAS:
-- **Build Pipeline**: Ensure code builds successfully
-- **Test Automation**: Run tests in CI environment
-- **Deployment Automation**: Automated deployment process
-- **Environment Configuration**: Proper env setup for production
-- **Monitoring**: Basic monitoring and health checks
-- **Security**: Basic security configurations
+- **Build Pipeline**: Ensure reliable builds
+- **Test Automation**: Comprehensive test coverage in CI
+- **Deployment Automation**: Zero-downtime deployments
+- **Environment Configuration**: Production-ready configs
+- **Monitoring**: Health checks and alerting
+- **Security**: Secure deployment practices
 
-🔧 DEVOPS RULES:
-- CI/CD pipeline must pass completely
-- Fix pipeline failures immediately
-- Ensure deployment is automated and reliable
-- Validate production deployment works
-- Set up basic monitoring and alerts
+🔧 DEVOPS RULES - STRICT ENFORCEMENT:
+- NEVER deploy broken or incomplete code
+- ALL builds and tests must pass before deployment
+- Security scans must pass
+- Deployment must be fully automated and tested
+- Rollback procedures must be in place
 
 ⚡ YOUR DEVOPS PROCESS:
-1. Create actions to write CI/CD configuration files
-2. Create actions to test build process locally
-3. Create actions to run CI/CD pipeline and capture results
-4. If pipeline fails, create actions to fix the failures
-5. Create actions to deploy and verify deployment works
-6. Repeat until deployment is successful
+1. FIRST: Validate project is deployment-ready
+2. IF NOT READY: Return rejection with specific blocking issues
+3. IF READY: Create comprehensive CI/CD pipeline
+4. Test pipeline thoroughly before approving
+5. Ensure monitoring and rollback capabilities
 
 {}
 
@@ -427,14 +797,17 @@ PROJECT STRUCTURE:
 
 You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
 
+FOR NON-DEPLOYABLE CODE - REJECTION FORMAT:
+❌ [{{ "Reject": {{ "reason": "Project doesn't build - missing Cargo.toml", "blocking_issues": ["No build configuration", "Tests failing", "Security vulnerabilities"] }} }}]
+
+FOR DEPLOYABLE CODE - DEVOPS FORMAT:
+✅ [{{ "Write": {{ "path": ".github/workflows/ci.yml", "content": "..." }} }}]
+
 DO NOT WRITE:
 ❌ "I'll set up the CI/CD pipeline..."
 ❌ "The deployment will include..."
 ❌ "DevOps configuration shows..."
 ❌ Any deployment plans or explanations
-
-WRITE ONLY:
-✅ [{{ "Write": {{ "path": ".github/workflows/ci.yml", "content": "..." }} }}]
 
 {}
             "#,

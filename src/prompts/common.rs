@@ -78,46 +78,59 @@ impl PromptBuilder {
 
     /// Common JSON formatting requirements section
     pub fn json_formatting_requirements() -> &'static str {
-        r#"🚨 CRITICAL JSON-ONLY RESPONSE REQUIREMENTS 🚨
+        r#"🚨🚨🚨 CRITICAL JSON-ONLY RESPONSE REQUIREMENTS 🚨🚨🚨
 
-⚠️ ABSOLUTELY NO TEXT OUTSIDE OF JSON ⚠️
-⚠️ DO NOT START WITH EXPLANATIONS ⚠️  
-⚠️ DO NOT END WITH SUMMARIES ⚠️
-⚠️ NO "Here are the actions:" OR SIMILAR TEXT ⚠️
+⛔⛔⛔ ABSOLUTELY FORBIDDEN - WILL CAUSE IMMEDIATE SYSTEM FAILURE ⛔⛔⛔
+❌ ```json (MARKDOWN CODE BLOCKS WILL CRASH THE SYSTEM)
+❌ ```javascript (MARKDOWN CODE BLOCKS WILL CRASH THE SYSTEM)
+❌ ```rust (MARKDOWN CODE BLOCKS WILL CRASH THE SYSTEM)
+❌ ```yaml (MARKDOWN CODE BLOCKS WILL CRASH THE SYSTEM)
+❌ ``` (ANY MARKDOWN FORMATTING WILL CRASH THE SYSTEM)
+❌ Any text before JSON (WILL CRASH THE SYSTEM)
+❌ Any text after JSON (WILL CRASH THE SYSTEM)
+❌ Any explanations or comments (WILL CRASH THE SYSTEM)
+
+🔥🔥🔥 SYSTEM WILL IMMEDIATELY CRASH IF YOU WRITE ANYTHING OTHER THAN PURE JSON 🔥🔥🔥
+
+⚠️ THE FIRST CHARACTER OF YOUR RESPONSE MUST BE [ ⚠️
+⚠️ THE LAST CHARACTER OF YOUR RESPONSE MUST BE ] ⚠️
+⚠️ NOTHING ELSE IS ALLOWED ⚠️
 
 YOUR RESPONSE MUST:
-✅ Start immediately with [ (opening bracket)
-✅ End immediately with ] (closing bracket)  
-✅ Contain ONLY valid JSON array of actions
+✅ Start IMMEDIATELY with [ (opening bracket) - NO EXCEPTIONS
+✅ End IMMEDIATELY with ] (closing bracket) - NO EXCEPTIONS
+✅ Contain ONLY valid JSON array of actions - NO EXCEPTIONS
 ✅ Use proper JSON escaping: \\n for newlines, \\" for quotes, \\\\ for backslashes
 ✅ Have all braces and brackets properly matched
-✅ ALWAYS use RELATIVE paths only (e.g., "src/App.vue", NOT "/home/user/src/App.vue")
+✅ ALWAYS use RELATIVE paths only (e.g., "src/main.rs", NOT "orchyn_api/src/main.rs")
 
-❌ NEVER include text like:
+❌❌❌ SYSTEM WILL CRASH IF YOU INCLUDE ANY OF THESE ❌❌❌
 ❌ "Here are the actions to complete this task:"
-❌ "The following JSON actions will..."  
+❌ "The following JSON actions will..."
 ❌ "I'll create these files:"
 ❌ "Summary: The above actions will..."
+❌ "```json" or any markdown
 ❌ Absolute file paths starting with "/" or containing system paths
+❌ Project directory prefixes (e.g., "orchyn_api/src/main.rs")
 
-🗂️ PATH REQUIREMENTS:
-✅ "path": "src/App.vue" (CORRECT - relative path)
-✅ "path": "package.json" (CORRECT - relative path)  
-✅ "path": "public/index.html" (CORRECT - relative path)
-❌ "path": "/home/user/project/src/App.vue" (WRONG - absolute path)
-❌ "path": "/absolute/path/file.js" (WRONG - absolute path)
+🗂️ PATH REQUIREMENTS (VIOLATION WILL CRASH SYSTEM):
+✅ "path": "src/main.rs" (CORRECT - relative path)
+✅ "path": "Cargo.toml" (CORRECT - relative path)
+✅ "path": "tests/integration.rs" (CORRECT - relative path)
+❌ "path": "orchyn_api/src/main.rs" (WRONG - includes project directory)
+❌ "path": "/absolute/path/file.rs" (WRONG - absolute path)
 
-EXAMPLE CORRECT FORMAT:
+🔥 ONLY ACCEPTABLE RESPONSE FORMAT (COPY EXACTLY) 🔥
 [
     {
         "Write": {
-            "path": "src/App.vue",
-            "content": "<template>\\n  <div>Hello</div>\\n</template>"
+            "path": "src/main.rs",
+            "content": "use actix_web::{web, App, HttpServer};\\n\\n#[actix_web::main]\\nasync fn main() -> std::io::Result<()> {\\n    HttpServer::new(|| App::new())\\n        .bind(\\\"127.0.0.1:8080\\\")?\\n        .run()\\n        .await\\n}"
         }
     }
 ]
 
-⚠️ FAILURE TO FOLLOW THIS FORMAT WILL CAUSE SYSTEM ERRORS ⚠️"#
+🚨 ANY DEVIATION FROM PURE JSON FORMAT WILL CAUSE IMMEDIATE SYSTEM FAILURE 🚨"#
     }
 
     /// Common implementation guidelines section
@@ -298,42 +311,147 @@ EXAMPLE CORRECT FORMAT:
             ]"#
     }
 
-    /// FeatureDev specific action examples
+    /// FeatureDev specific action examples - COMPLETE IMPLEMENTATIONS WITH TESTS REQUIRED
     pub fn feature_dev_action_examples() -> &'static str {
-        r#"FEATURE DEV ACTION EXAMPLES (ALWAYS USE RELATIVE PATHS):
+        r#"🚨 MANDATORY: FOLLOW OFFICIAL DOCUMENTATION + SELF-TEST YOUR CODE 🚨
+
+PRODUCTION-READY FEATURE DEV REQUIREMENTS (LANGUAGE-AGNOSTIC):
+            🚨 MANDATORY WORKFLOW - FOLLOW OFFICIAL DOCUMENTATION 🚨
+
+            📋 STEP 1: OFFICIAL PROJECT SETUP (ALWAYS START HERE):
             [
                 {
-                    "Write": {
-                        "path": "src/components/TodoItem.vue",
-                        "content": "<template>\n  <div class=\"todo-item\">\n    <input type=\"checkbox\" v-model=\"todo.completed\" />\n    <span>{{ todo.title }}</span>\n  </div>\n</template>\n\n<script setup>\ndefineProps(['todo'])\n</script>"
-                    }
-                },
-                {
-                    "Write": {
-                        "path": "vite.config.ts",
-                        "content": "import { defineConfig } from 'vite'\nimport vue from '@vitejs/plugin-vue'\n\nexport default defineConfig({\n  plugins: [vue()]\n})"
-                    }
-                },
-                {
                     "RunCommand": {
-                        "command": "npm run build",
+                        "command": "cargo new todo-api",
                         "env": []
                     }
                 },
                 {
                     "RunCommand": {
-                        "command": "npm test",
+                        "command": "cd todo-api",
                         "env": []
                     }
                 }
             ]
 
-            ⚠️ PATH & COMMAND GUIDELINES:
-            - ALWAYS use relative paths: "src/App.vue" NOT "/home/user/src/App.vue"  
-            - Use `npm run build` NOT `npm run dev` (dev servers block)
-            - Use `cargo check` NOT `cargo run` (servers block)
-            - Use `python -m py_compile` NOT `python manage.py runserver`
-            - If testing servers, use: `timeout 10s command` or `command > log 2>&1 &`"#
+            📋 STEP 2: CONFIGURE PROJECT (FOLLOW DOCS):
+            [
+                {
+                    "Write": {
+                        "path": "Cargo.toml",
+                        "content": "[package]\nname = \"todo-api\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nactix-web = \"4\"\nserde = { version = \"1.0\", features = [\"derive\"] }\ntokio = { version = \"1.0\", features = [\"full\"] }"
+                    }
+                }
+            ]
+
+            📋 STEP 3: VERIFY SETUP WORKS:
+            [
+                {
+                    "RunCommand": {
+                        "command": "cargo check",
+                        "env": []
+                    }
+                }
+            ]
+
+            📋 STEP 4: BUILD COMPLETE APPLICATION:
+            [
+                {
+                    "Write": {
+                        "path": "src/main.rs",
+                        "content": "// Complete implementation here"
+                    }
+                },
+                {
+                    "Write": {
+                        "path": "src/models.rs",
+                        "content": "// Data models here"
+                    }
+                }
+            ]
+
+            📋 STEP 5: TEST YOUR WORK (MANDATORY):
+            [
+                {
+                    "RunCommand": {
+                        "command": "cargo check",
+                        "env": []
+                    }
+                },
+                {
+                    "RunCommand": {
+                        "command": "cargo test",
+                        "env": []
+                    }
+                }
+            ]
+                {
+                    "Write": {
+                        "path": "src/main.rs",
+                        "content": "mod models;\nmod handlers;\nmod auth;\nmod database;\nmod middleware;\n\nuse actix_web::{web, App, HttpServer, middleware::Logger};\nuse sqlx::SqlitePool;\nuse std::env;\n\n#[actix_web::main]\nasync fn main() -> std::io::Result<()> {\n    env_logger::init();\n    \n    let database_url = env::var(\"DATABASE_URL\")\n        .unwrap_or_else(|_| \"sqlite:./todo.db\".to_string());\n    \n    let pool = SqlitePool::connect(&database_url)\n        .await\n        .expect(\"Failed to connect to database\");\n    \n    // Run migrations\n    sqlx::migrate!(\"./migrations\")\n        .run(&pool)\n        .await\n        .expect(\"Failed to run migrations\");\n    \n    println!(\"🚀 Starting Todo API server on http://127.0.0.1:8080\");\n    \n    HttpServer::new(move || {\n        App::new()\n            .app_data(web::Data::new(pool.clone()))\n            .wrap(Logger::default())\n            .wrap(actix_cors::Cors::permissive())\n            .service(handlers::health)\n            .service(handlers::register)\n            .service(handlers::login)\n            .service(handlers::get_todos)\n            .service(handlers::create_todo)\n            .service(handlers::update_todo)\n            .service(handlers::delete_todo)\n            .service(handlers::get_user_profile)\n    })\n    .bind(\"127.0.0.1:8080\")?\n    .run()\n    .await\n}"
+                    }
+                },
+                {
+                    "Write": {
+                        "path": "src/models.rs",
+                        "content": "use serde::{Deserialize, Serialize};\nuse sqlx::FromRow;\nuse chrono::{DateTime, Utc};\n\n#[derive(Debug, Serialize, Deserialize, FromRow)]\npub struct User {\n    pub id: i64,\n    pub username: String,\n    pub email: String,\n    pub password_hash: String,\n    pub created_at: DateTime<Utc>,\n}\n\n#[derive(Debug, Serialize, Deserialize, FromRow)]\npub struct Todo {\n    pub id: i64,\n    pub user_id: i64,\n    pub title: String,\n    pub description: Option<String>,\n    pub completed: bool,\n    pub created_at: DateTime<Utc>,\n    pub updated_at: DateTime<Utc>,\n}\n\n#[derive(Debug, Deserialize)]\npub struct RegisterRequest {\n    pub username: String,\n    pub email: String,\n    pub password: String,\n}\n\n#[derive(Debug, Deserialize)]\npub struct LoginRequest {\n    pub username: String,\n    pub password: String,\n}\n\n#[derive(Debug, Serialize)]\npub struct LoginResponse {\n    pub token: String,\n    pub user: UserResponse,\n}\n\n#[derive(Debug, Serialize)]\npub struct UserResponse {\n    pub id: i64,\n    pub username: String,\n    pub email: String,\n}\n\n#[derive(Debug, Deserialize)]\npub struct CreateTodoRequest {\n    pub title: String,\n    pub description: Option<String>,\n}\n\n#[derive(Debug, Deserialize)]\npub struct UpdateTodoRequest {\n    pub title: Option<String>,\n    pub description: Option<String>,\n    pub completed: Option<bool>,\n}\n\n#[derive(Debug, Serialize)]\npub struct ApiResponse<T> {\n    pub success: bool,\n    pub data: Option<T>,\n    pub message: String,\n}\n\nimpl<T> ApiResponse<T> {\n    pub fn success(data: T, message: &str) -> Self {\n        Self {\n            success: true,\n            data: Some(data),\n            message: message.to_string(),\n        }\n    }\n    \n    pub fn error(message: &str) -> Self {\n        Self {\n            success: false,\n            data: None,\n            message: message.to_string(),\n        }\n    }\n}"
+                    }
+                },
+                {
+                    "Write": {
+                        "path": "src/handlers.rs",
+                        "content": "use actix_web::{web, HttpResponse, Result, HttpRequest};\nuse sqlx::SqlitePool;\nuse crate::models::*;\nuse crate::auth::{hash_password, verify_password, create_jwt, verify_jwt};\nuse chrono::Utc;\n\n#[actix_web::get(\"/health\")]\npub async fn health() -> Result<HttpResponse> {\n    Ok(HttpResponse::Ok().json(ApiResponse::success(\n        serde_json::json!({\"status\": \"healthy\", \"timestamp\": Utc::now()}),\n        \"API is healthy\"\n    )))\n}\n\n#[actix_web::post(\"/auth/register\")]\npub async fn register(\n    pool: web::Data<SqlitePool>,\n    req: web::Json<RegisterRequest>,\n) -> Result<HttpResponse> {\n    let password_hash = hash_password(&req.password)\n        .map_err(|_| actix_web::error::ErrorInternalServerError(\"Password hashing failed\"))?;\n    \n    let result = sqlx::query!(\n        \"INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)\",\n        req.username,\n        req.email,\n        password_hash,\n        Utc::now()\n    )\n    .execute(pool.get_ref())\n    .await;\n    \n    match result {\n        Ok(_) => Ok(HttpResponse::Created().json(ApiResponse::success(\n            serde_json::json!({\"username\": req.username}),\n            \"User registered successfully\"\n        ))),\n        Err(_) => Ok(HttpResponse::BadRequest().json(ApiResponse::<()>::error(\n            \"Registration failed - username or email already exists\"\n        )))\n    }\n}\n\n#[actix_web::post(\"/auth/login\")]\npub async fn login(\n    pool: web::Data<SqlitePool>,\n    req: web::Json<LoginRequest>,\n) -> Result<HttpResponse> {\n    let user = sqlx::query_as!(User,\n        \"SELECT * FROM users WHERE username = ?\",\n        req.username\n    )\n    .fetch_optional(pool.get_ref())\n    .await\n    .map_err(|_| actix_web::error::ErrorInternalServerError(\"Database error\"))?;\n    \n    match user {\n        Some(user) => {\n            if verify_password(&req.password, &user.password_hash)? {\n                let token = create_jwt(user.id)?;\n                Ok(HttpResponse::Ok().json(ApiResponse::success(\n                    LoginResponse {\n                        token,\n                        user: UserResponse {\n                            id: user.id,\n                            username: user.username,\n                            email: user.email,\n                        }\n                    },\n                    \"Login successful\"\n                )))\n            } else {\n                Ok(HttpResponse::Unauthorized().json(ApiResponse::<()>::error(\"Invalid credentials\")))\n            }\n        }\n        None => Ok(HttpResponse::Unauthorized().json(ApiResponse::<()>::error(\"Invalid credentials\")))\n    }\n}\n\n#[actix_web::get(\"/todos\")]\npub async fn get_todos(\n    pool: web::Data<SqlitePool>,\n    req: HttpRequest,\n) -> Result<HttpResponse> {\n    let user_id = verify_jwt(&req)?;\n    \n    let todos = sqlx::query_as!(Todo,\n        \"SELECT * FROM todos WHERE user_id = ? ORDER BY created_at DESC\",\n        user_id\n    )\n    .fetch_all(pool.get_ref())\n    .await\n    .map_err(|_| actix_web::error::ErrorInternalServerError(\"Database error\"))?;\n    \n    Ok(HttpResponse::Ok().json(ApiResponse::success(todos, \"Todos retrieved successfully\")))\n}\n\n#[actix_web::post(\"/todos\")]\npub async fn create_todo(\n    pool: web::Data<SqlitePool>,\n    req: HttpRequest,\n    todo_req: web::Json<CreateTodoRequest>,\n) -> Result<HttpResponse> {\n    let user_id = verify_jwt(&req)?;\n    let now = Utc::now();\n    \n    let result = sqlx::query!(\n        \"INSERT INTO todos (user_id, title, description, completed, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)\",\n        user_id,\n        todo_req.title,\n        todo_req.description,\n        false,\n        now,\n        now\n    )\n    .execute(pool.get_ref())\n    .await;\n    \n    match result {\n        Ok(_) => Ok(HttpResponse::Created().json(ApiResponse::success(\n            serde_json::json!({\"title\": todo_req.title}),\n            \"Todo created successfully\"\n        ))),\n        Err(_) => Ok(HttpResponse::InternalServerError().json(ApiResponse::<()>::error(\"Failed to create todo\")))\n    }\n}\n\n#[actix_web::put(\"/todos/{id}\")]\npub async fn update_todo(\n    pool: web::Data<SqlitePool>,\n    req: HttpRequest,\n    path: web::Path<i64>,\n    update_req: web::Json<UpdateTodoRequest>,\n) -> Result<HttpResponse> {\n    let user_id = verify_jwt(&req)?;\n    let todo_id = path.into_inner();\n    \n    // Build dynamic update query\n    let mut query = \"UPDATE todos SET updated_at = ?\".to_string();\n    let mut params: Vec<String> = vec![Utc::now().to_rfc3339()];\n    \n    if let Some(title) = &update_req.title {\n        query.push_str(\", title = ?\");\n        params.push(title.clone());\n    }\n    if let Some(description) = &update_req.description {\n        query.push_str(\", description = ?\");\n        params.push(description.clone());\n    }\n    if let Some(completed) = update_req.completed {\n        query.push_str(\", completed = ?\");\n        params.push(completed.to_string());\n    }\n    \n    query.push_str(\" WHERE id = ? AND user_id = ?\");\n    params.push(todo_id.to_string());\n    params.push(user_id.to_string());\n    \n    let result = sqlx::query(&query)\n        .bind(&params[0])\n        .execute(pool.get_ref())\n        .await;\n    \n    match result {\n        Ok(result) => {\n            if result.rows_affected() > 0 {\n                Ok(HttpResponse::Ok().json(ApiResponse::success(\n                    serde_json::json!({\"id\": todo_id}),\n                    \"Todo updated successfully\"\n                )))\n            } else {\n                Ok(HttpResponse::NotFound().json(ApiResponse::<()>::error(\"Todo not found\")))\n            }\n        }\n        Err(_) => Ok(HttpResponse::InternalServerError().json(ApiResponse::<()>::error(\"Failed to update todo\")))\n    }\n}\n\n#[actix_web::delete(\"/todos/{id}\")]\npub async fn delete_todo(\n    pool: web::Data<SqlitePool>,\n    req: HttpRequest,\n    path: web::Path<i64>,\n) -> Result<HttpResponse> {\n    let user_id = verify_jwt(&req)?;\n    let todo_id = path.into_inner();\n    \n    let result = sqlx::query!(\n        \"DELETE FROM todos WHERE id = ? AND user_id = ?\",\n        todo_id,\n        user_id\n    )\n    .execute(pool.get_ref())\n    .await;\n    \n    match result {\n        Ok(result) => {\n            if result.rows_affected() > 0 {\n                Ok(HttpResponse::Ok().json(ApiResponse::success(\n                    serde_json::json!({\"id\": todo_id}),\n                    \"Todo deleted successfully\"\n                )))\n            } else {\n                Ok(HttpResponse::NotFound().json(ApiResponse::<()>::error(\"Todo not found\")))\n            }\n        }\n        Err(_) => Ok(HttpResponse::InternalServerError().json(ApiResponse::<()>::error(\"Failed to delete todo\")))\n    }\n}\n\n#[actix_web::get(\"/user/profile\")]\npub async fn get_user_profile(\n    pool: web::Data<SqlitePool>,\n    req: HttpRequest,\n) -> Result<HttpResponse> {\n    let user_id = verify_jwt(&req)?;\n    \n    let user = sqlx::query_as!(User,\n        \"SELECT * FROM users WHERE id = ?\",\n        user_id\n    )\n    .fetch_optional(pool.get_ref())\n    .await\n    .map_err(|_| actix_web::error::ErrorInternalServerError(\"Database error\"))?;\n    \n    match user {\n        Some(user) => Ok(HttpResponse::Ok().json(ApiResponse::success(\n            UserResponse {\n                id: user.id,\n                username: user.username,\n                email: user.email,\n            },\n            \"Profile retrieved successfully\"\n        ))),\n        None => Ok(HttpResponse::NotFound().json(ApiResponse::<()>::error(\"User not found\")))\n    }\n}"
+                    }
+                },
+                {
+                    "Write": {
+                        "path": "tests/integration_tests.rs",
+                        "content": "use actix_web::{test, web, App};\nuse sqlx::SqlitePool;\nuse todo_api::handlers::*;\nuse todo_api::models::*;\n\n#[actix_web::test]\nasync fn test_health_endpoint() {\n    let app = test::init_service(\n        App::new().service(health)\n    ).await;\n    \n    let req = test::TestRequest::get()\n        .uri(\"/health\")\n        .to_request();\n    \n    let resp = test::call_service(&app, req).await;\n    assert!(resp.status().is_success());\n}\n\n#[actix_web::test]\nasync fn test_create_user() {\n    let pool = SqlitePool::connect(\":memory:\").await.unwrap();\n    \n    // Run migrations\n    sqlx::migrate!(\"./migrations\")\n        .run(&pool)\n        .await\n        .unwrap();\n    \n    let app = test::init_service(\n        App::new()\n            .app_data(web::Data::new(pool))\n            .service(create_user)\n    ).await;\n    \n    let user_data = CreateUser {\n        username: \"testuser\".to_string(),\n        email: \"test@example.com\".to_string(),\n        password: \"password123\".to_string(),\n    };\n    \n    let req = test::TestRequest::post()\n        .uri(\"/users\")\n        .set_json(&user_data)\n        .to_request();\n    \n    let resp = test::call_service(&app, req).await;\n    assert_eq!(resp.status(), 201);\n}"
+                    }
+                },
+                {
+                    "Write": {
+                        "path": "migrations/001_initial.sql",
+                        "content": "CREATE TABLE IF NOT EXISTS users (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    username TEXT UNIQUE NOT NULL,\n    email TEXT UNIQUE NOT NULL,\n    password_hash TEXT NOT NULL,\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE TABLE IF NOT EXISTS todos (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    user_id INTEGER NOT NULL,\n    title TEXT NOT NULL,\n    description TEXT,\n    completed BOOLEAN DEFAULT FALSE,\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (user_id) REFERENCES users (id)\n);"
+                    }
+                },
+                {
+                    "RunCommand": {
+                        "command": "cargo check",
+                        "env": []
+                    }
+                },
+                {
+                    "RunCommand": {
+                        "command": "cargo test",
+                        "env": []
+                    }
+                }
+            ]
+
+            🚨 CRITICAL REQUIREMENTS - SELF-TESTING MANDATORY 🚨
+
+            ✅ MUST FOLLOW OFFICIAL DOCUMENTATION:
+            - Start with official project setup commands (cargo new, npm init, etc.)
+            - Follow language-specific best practices and conventions
+            - Use official project structure and naming conventions
+
+            ✅ MUST SELF-TEST YOUR CODE:
+            - ALWAYS use RunCommand to test your own code
+            - Run build commands after each major change
+            - Run test commands to verify functionality
+            - Fix any errors immediately before proceeding
+
+            ✅ MUST GENERATE COMPLETE APPLICATIONS:
+            - Generate ALL necessary files for complete functionality
+            - Include comprehensive tests for every feature
+            - Create unit tests, integration tests, and API endpoint tests
+            - Include database migrations and test data setup
+            - Include proper error handling, logging, and validation
+            - Use relative paths: "src/main.rs" NOT "project/src/main.rs"
+            - Create complete implementations with full test coverage
+
+            🚨 FAILURE TO FOLLOW OFFICIAL DOCS = IMMEDIATE REJECTION 🚨"#
     }
 
     /// QA specific action examples
