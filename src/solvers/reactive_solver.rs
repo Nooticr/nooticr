@@ -370,7 +370,7 @@ impl ReactiveSolver {
         let llm_response = GeminiCLI::query_structured_from_dir(
             "reactive_solver", 
             &prompt, 
-            Some("gemini-2.0-flash-exp"), 
+Some("gemini-2.5-flash"), 
             working_dir
         ).await.map_err(|e| {
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
@@ -443,7 +443,7 @@ impl ReactiveSolver {
             let llm_response = GeminiCLI::query_structured_from_dir(
                 "reactive_solver_modifications", 
                 &prompt, 
-                Some("gemini-2.0-flash-exp"), 
+    Some("gemini-2.5-flash"), 
                 working_dir
             ).await.map_err(|e| {
                 Box::new(e) as Box<dyn std::error::Error + Send + Sync>
