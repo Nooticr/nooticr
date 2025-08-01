@@ -4,8 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
 
-use crate::enums::{Action, action::ActionResult, llm_response::Todo};
-use crate::mcp::gemini::GeminiCLI as GeminiCli;
+use crate::enums::{Action, action::ActionResult, llm_response::Todo, LLMResponse};
+use crate::mcp::gemini::GeminiCLI;
+use std::path::Path;
 
 /// Represents the current state of the execution environment
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -364,13 +365,47 @@ impl ReactiveSolver {
         
         debug!("Sending prompt to LLM: {}", prompt);
         
-        // Use GeminiCLI to generate response
-        let response = GeminiCli::query(&prompt).await.map_err(|e| {
+        // Use GeminiCLI to generate response with structured parsing from working directory
+        let working_dir = Path::new(&self.execution_state.working_directory);
+        let llm_response = GeminiCLI::query_structured_from_dir(
+            "reactive_solver", 
+            &prompt, 
+            Some("gemini-2.0-flash-exp"), 
+            working_dir
+        ).await.map_err(|e| {
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
         
-        // Extract command from response
-        let command = response.trim().to_string();
+        // Extract command from structured response
+        let command = match llm_response {
+            LLMResponse::Text { content } => content.trim().to_string(),
+            // Handle various todo-containing response types
+            LLMResponse::FeatureDevelopment { todos } 
+            | LLMResponse::TaskDevelopment { todos }
+            | LLMResponse::UnitTesting { todos }
+            | LLMResponse::IntegrationTesting { todos }
+            | LLMResponse::E2ETesting { todos } => {
+                // If we got todos back, extract the first command from the first todo
+                if let Some(first_todo) = todos.first() {
+                    if let Some(first_action) = first_todo.actions.first() {
+                        match first_action {
+                            Action::RunCommand { command, .. } => command.clone(),
+                            _ => format!("{:?}", first_action), // Fallback to debug representation
+                        }
+                    } else {
+                        "echo 'No actions found in todo'".to_string()
+                    }
+                } else {
+                    "echo 'No todos found in response'".to_string()
+                }
+            }
+            // Handle other response types by converting to generic command
+            _ => {
+                warn!("Received unexpected LLM response type for command generation, using fallback");
+                "echo 'Unexpected response type from LLM'".to_string()
+            }
+        };
+        
         info!("LLM generated command: {}", command);
         
         Ok(command)
@@ -403,21 +438,52 @@ impl ReactiveSolver {
             
             debug!("Sending modification prompt to LLM: {}", prompt);
             
-            let response = GeminiCli::query(&prompt).await.map_err(|e| {
+            // Use GeminiCLI with structured parsing from working directory
+            let working_dir = Path::new(&self.execution_state.working_directory);
+            let llm_response = GeminiCLI::query_structured_from_dir(
+                "reactive_solver_modifications", 
+                &prompt, 
+                Some("gemini-2.0-flash-exp"), 
+                working_dir
+            ).await.map_err(|e| {
                 Box::new(e) as Box<dyn std::error::Error + Send + Sync>
             })?;
             
-            // Try to parse the response as new actions
-            match serde_json::from_str::<Vec<Action>>(&response) {
-                Ok(new_actions) => {
-                    if let Some(ref mut todo) = self.current_todo {
-                        info!("Updating todo actions based on user modification");
-                        todo.actions = new_actions;
-                        todo.reset_failures(); // Reset since plan changed
+            // Handle structured response for modifications
+            match llm_response {
+                // Handle various todo-containing response types
+                LLMResponse::FeatureDevelopment { todos } 
+                | LLMResponse::TaskDevelopment { todos }
+                | LLMResponse::UnitTesting { todos }
+                | LLMResponse::IntegrationTesting { todos }
+                | LLMResponse::E2ETesting { todos } => {
+                    if let Some(first_todo) = todos.first() {
+                        if let Some(ref mut current_todo) = self.current_todo {
+                            info!("Updating todo actions based on user modification");
+                            current_todo.actions = first_todo.actions.clone();
+                            current_todo.reset_failures(); // Reset since plan changed
+                        }
+                    } else {
+                        warn!("No todos found in modification response");
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to parse LLM response as actions: {}. Response: {}", e, response);
+                LLMResponse::Text { content } => {
+                    // Try to parse the text response as JSON actions (fallback)
+                    match serde_json::from_str::<Vec<Action>>(&content) {
+                        Ok(new_actions) => {
+                            if let Some(ref mut todo) = self.current_todo {
+                                info!("Updating todo actions based on user modification (from text response)");
+                                todo.actions = new_actions;
+                                todo.reset_failures(); // Reset since plan changed
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse LLM text response as actions: {}. Response: {}", e, content);
+                        }
+                    }
+                }
+                _ => {
+                    warn!("Received unexpected LLM response type for user modifications, ignoring");
                 }
             }
         }

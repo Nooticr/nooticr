@@ -33,7 +33,7 @@ async fn test_reactive_solver_e2e_project_setup() {
                 path: project_dir.to_string_lossy().to_string(),
             },
             Action::Write {
-                path: "Cargo.toml".to_string(),
+                path: project_dir.join("Cargo.toml").to_string_lossy().to_string(),
                 content: r#"[package]
 name = "test_project"
 version = "0.1.0"
@@ -47,7 +47,7 @@ tokio-test = "0.4"
 "#.to_string(),
             },
             Action::CreateDirectory {
-                path: "src".to_string(),
+                path: project_dir.join("src").to_string_lossy().to_string(),
             },
         ],
     );
@@ -57,7 +57,7 @@ tokio-test = "0.4"
         "Create Source Files".to_string(),
         vec![
             Action::Write {
-                path: "src/lib.rs".to_string(),
+                path: project_dir.join("src/lib.rs").to_string_lossy().to_string(),
                 content: r#"//! Test project library
 use serde::{Deserialize, Serialize};
 
@@ -102,7 +102,7 @@ mod tests {
 "#.to_string(),
             },
             Action::Write {
-                path: "src/main.rs".to_string(),
+                path: project_dir.join("src/main.rs").to_string_lossy().to_string(),
                 content: r#"use test_project::{Person, add};
 
 fn main() {
@@ -131,14 +131,14 @@ fn main() {
         "Create Additional Files".to_string(),
         vec![
             Action::Write {
-                path: "README.md".to_string(),
+                path: project_dir.join("README.md").to_string_lossy().to_string(),
                 content: "# Test Project\n\nThis is a test project created by ReactiveSolver.\n".to_string(),
             },
             Action::CreateDirectory {
-                path: "tests".to_string(),
+                path: project_dir.join("tests").to_string_lossy().to_string(),
             },
             Action::Write {
-                path: "tests/integration_test.rs".to_string(),
+                path: project_dir.join("tests/integration_test.rs").to_string_lossy().to_string(),
                 content: "// Integration tests would go here\n".to_string(),
             },
             Action::RunCommand {
@@ -292,7 +292,7 @@ async fn test_reactive_solver_user_modifications() {
                 path: project_dir.to_string_lossy().to_string(),
             },
             Action::Write {
-                path: "simple.txt".to_string(),
+                path: project_dir.join("simple.txt").to_string_lossy().to_string(),
                 content: "Simple content".to_string(),
             },
         ],
