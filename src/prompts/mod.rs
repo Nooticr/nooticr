@@ -24,7 +24,7 @@ impl Prompts {
             🔧 **STAGE 1: COMPLETE FEATURE DEVELOPMENT**
             - Agent: FeatureDev
             - Goal: Build ALL core functionality with complete implementations
-            - Breaks work into 8-12 dependent todos covering entire feature set
+            - Breaks work into 4-7 dependent todos covering entire feature set
             - After each todo: verify application builds and runs (fix errors if any)
             - After each todo: verify comprehensive tests pass (fix failing tests)
             - Only moves to next todo when current feature is fully complete
@@ -59,12 +59,12 @@ impl Prompts {
             - Each agent produces actionable todos and fixes issues in loops
             - Focus on making things WORK, not perfect architecture
 
-            Return a JSON array with these simple task specifications:
+            Return a JSON array of tasks with this structure:
 
             [{{
                 "id": "task_1",
                 "title": "Feature Development - Build MVP",
-                "description": "Develop the core functionality. Break into 8-12 todos. After each todo, verify npm run dev works and tests pass. Fix any issues before proceeding.",
+                "description": "Develop the core functionality. Break into 4-7 todos. After each todo, verify npm run dev works and tests pass. Fix any issues before proceeding.",
                 "priority": "Critical",
                 "complexity": 8,
                 "estimated_hours": "16-24 hours",
@@ -147,50 +147,91 @@ CURRENT CODEBASE:
 
 🔧 RUST-SPECIFIC DEVELOPMENT WORKFLOW:
 
-🚨 CRITICAL: YOU MUST GENERATE ALL 8 TODOS IN ONE RESPONSE 🚨
+🚨 CRITICAL: YOU MUST GENERATE ALL 7 TODOS IN ONE RESPONSE 🚨
 
-⚠️ DO NOT GENERATE JUST ONE TODO - GENERATE ALL 8 TODOS WITH ALL ACTIONS ⚠️
+⚠️ DO NOT GENERATE JUST ONE TODO - GENERATE ALL 7 TODOS WITH ALL ACTIONS ⚠️
 
-YOU MUST RETURN A JSON ARRAY WITH ALL 8 TODOS:
+YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
 
-TODO 1: Project Setup & Installation
-- RunCommand: cargo new todo-api
-- Write: Cargo.toml with dependencies
-- RunCommand: cargo check
-
-TODO 2: Basic Server Structure
-- Write: src/main.rs with Actix-web server
-- RunCommand: cargo check
-
-TODO 3: Database Models & Connection
-- Write: src/models.rs with User and Todo structs
-- Write: src/database.rs with SQLite connection
-- RunCommand: cargo check
-
-TODO 4: User Authentication
-- Write: src/auth.rs with JWT authentication
-- RunCommand: cargo check
-
-TODO 5: API Handlers & Endpoints
-- Write: src/handlers.rs with all CRUD endpoints
-- RunCommand: cargo check
-
-TODO 6: Database Migrations
-- Write: migrations/001_initial.sql with schema
-- RunCommand: cargo check
-
-TODO 7: Integration Tests
-- Write: tests/integration_tests.rs with API tests
-- RunCommand: cargo test
-
-TODO 8: Final Integration & Testing
-- Write: src/lib.rs with module declarations
-- RunCommand: cargo check
-- RunCommand: cargo test
-- RunCommand: cargo build
+[
+  {{
+    "title": "Project Setup & Installation",
+    "description": "Initialize Rust project with cargo and dependencies",
+    "actions": [
+      {{"RunCommand": {{"command": "cargo new todo-api", "env": null}}}},
+      {{"Write": {{"path": "Cargo.toml", "content": "..."}}}},
+      {{"RunCommand": {{"command": "cargo check", "env": null}}}}
+    ],
+    "priority": "High",
+    "complexity": "Low"
+  }},
+  {{
+    "title": "Basic Server Structure",
+    "description": "Create main server with Actix-web",
+    "actions": [
+      {{"Write": {{"path": "src/main.rs", "content": "..."}}}},
+      {{"RunCommand": {{"command": "cargo check", "env": null}}}}
+    ],
+    "priority": "High", 
+    "complexity": "Medium"
+  }},
+  {{
+    "title": "Database Models & Connection",
+    "description": "Set up database models and connection",
+    "actions": [
+      {{"Write": {{"path": "src/models.rs", "content": "..."}}}},
+      {{"Write": {{"path": "src/database.rs", "content": "..."}}}},
+      {{"RunCommand": {{"command": "cargo check", "env": null}}}}
+    ],
+    "priority": "High",
+    "complexity": "Medium"
+  }},
+  {{
+    "title": "User Authentication", 
+    "description": "Implement JWT authentication",
+    "actions": [
+      {{"Write": {{"path": "src/auth.rs", "content": "..."}}}},
+      {{"RunCommand": {{"command": "cargo check", "env": null}}}}
+    ],
+    "priority": "Medium",
+    "complexity": "High"
+  }},
+  {{
+    "title": "API Handlers & Endpoints",
+    "description": "Create all CRUD API endpoints", 
+    "actions": [
+      {{"Write": {{"path": "src/handlers.rs", "content": "..."}}}},
+      {{"RunCommand": {{"command": "cargo check", "env": null}}}}
+    ],
+    "priority": "High",
+    "complexity": "High"
+  }},
+  {{
+    "title": "Integration Tests",
+    "description": "Create comprehensive API tests",
+    "actions": [
+      {{"Write": {{"path": "tests/integration_tests.rs", "content": "..."}}}},
+      {{"RunCommand": {{"command": "cargo test", "env": null}}}}
+    ],
+    "priority": "Medium",
+    "complexity": "Medium"
+  }},
+  {{
+    "title": "Final Integration & Testing",
+    "description": "Complete integration and final testing",
+    "actions": [
+      {{"Write": {{"path": "src/lib.rs", "content": "..."}}}},
+      {{"RunCommand": {{"command": "cargo check", "env": null}}}},
+      {{"RunCommand": {{"command": "cargo test", "env": null}}}},
+      {{"RunCommand": {{"command": "cargo build", "env": null}}}}
+    ],
+    "priority": "High",
+    "complexity": "Low"
+  }}
+]
 
 🚨 CRITICAL REQUIREMENTS 🚨
-- GENERATE ALL 8 TODOS IN ONE RESPONSE
+- GENERATE ALL 7 TODOS IN ONE RESPONSE
 - EACH TODO MUST HAVE MULTIPLE ACTIONS
 - INCLUDE BOTH RunCommand AND Write ACTIONS
 - NO STOPPING AFTER FIRST TODO
@@ -207,17 +248,16 @@ TODO 8: Final Integration & Testing
 
 🚨 CRITICAL: YOUR RESPONSE MUST BE A COMPLETE JSON ARRAY 🚨
 
-⚠️ DO NOT STOP AFTER ONE TODO - GENERATE ALL 8 TODOS ⚠️
+⚠️ DO NOT STOP AFTER ONE TODO - GENERATE ALL 7 TODOS ⚠️
 
-YOUR RESPONSE MUST BE A JSON ARRAY WITH ALL 8 TODOS:
+YOUR RESPONSE MUST BE A JSON ARRAY WITH ALL 7 TODOS:
 - TODO 1: Project Setup & Installation
 - TODO 2: Basic Server Structure
 - TODO 3: Database Models & Connection
 - TODO 4: User Authentication
 - TODO 5: API Handlers & Endpoints
-- TODO 6: Database Migrations
-- TODO 7: Integration Tests
-- TODO 8: Final Integration & Testing
+- TODO 6: Integration Tests
+- TODO 7: Final Integration & Testing
 
 🚨 EACH TODO MUST HAVE MULTIPLE ACTIONS 🚨
 - RunCommand actions for cargo commands
@@ -225,7 +265,7 @@ YOUR RESPONSE MUST BE A JSON ARRAY WITH ALL 8 TODOS:
 - Verification commands at the end
 - Complete file contents (no placeholders)
 
-🚨 FAILURE TO GENERATE ALL 8 TODOS = REJECTION 🚨
+🚨 FAILURE TO GENERATE ALL 7 TODOS = REJECTION 🚨
 
 🚀 PROJECT SETUP GUIDELINES:
 - If incomplete setup exists: Clear problematic files first, then use proper scaffolding
@@ -240,16 +280,16 @@ YOUR RESPONSE MUST BE A JSON ARRAY WITH ALL 8 TODOS:
 {}
 
 🚨🚨🚨 FINAL WARNING 🚨🚨🚨
-YOU MUST GENERATE ALL 8 TODOS IN ONE RESPONSE
+YOU MUST GENERATE ALL 7 TODOS IN ONE RESPONSE
 DO NOT GENERATE JUST ONE TODO AND STOP
-YOUR RESPONSE MUST BE A COMPLETE JSON ARRAY WITH ALL 8 TODOS
+YOUR RESPONSE MUST BE A COMPLETE JSON ARRAY WITH ALL 7 TODOS
 EACH TODO MUST HAVE MULTIPLE ACTIONS (RunCommand + Write + Verification)
 FAILURE TO DO THIS WILL RESULT IN REJECTION
-🚨🚨🚨 GENERATE ALL 8 TODOS NOW 🚨🚨🚨
+🚨🚨🚨 GENERATE ALL 7 TODOS NOW 🚨🚨🚨
 
 🚨 CRITICAL RESPONSE FORMAT 🚨
 
-You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array of Todo objects starting with [ and ending with ].
 
 ⚠️ CRITICAL PATH REQUIREMENTS:
 - ALWAYS use RELATIVE paths (e.g., "src/App.vue", "package.json")
@@ -268,7 +308,7 @@ DO NOT WRITE:
 ❌ Absolute file paths
 
 WRITE ONLY:
-✅ [{{ "Write": {{ "path": "src/App.vue", "content": "..." }} }}]
+✅ [{{ "title": "Feature Implementation", "actions": [{{ "Write": {{ "path": "src/App.vue", "content": "..." }} }}] }}]
             "#,
             agent_context_section,
             objective,
@@ -571,10 +611,10 @@ CODE TO REVIEW:
 🚨🚨🚨 MANDATORY JSON RESPONSE FORMAT 🚨🚨🚨
 
 FOR INCOMPLETE/BROKEN CODE - REJECTION FORMAT:
-❌ [{{ "Reject": {{ "reason": "Code doesn't compile - syntax errors in main.rs", "blocking_issues": ["Missing dependencies", "Syntax errors", "Incomplete implementation"] }} }}]
+❌ {{ "status": "Reject", "reason": "Code doesn't compile - syntax errors in main.rs", "blocking_issues": ["Missing dependencies", "Syntax errors", "Incomplete implementation"] }}
 
-FOR WORKING CODE - REVIEW FORMAT:
-✅ [{{ "Replace": {{ "path": "src/utils.js", "old_content": "...", "new_content": "..." }} }}]
+FOR WORKING CODE - ACCEPTANCE FORMAT:
+✅ {{ "status": "Accept", "data": [{{ "title": "Code Review Fixes", "actions": [{{ "Replace": {{ "path": "src/utils.js", "old_content": "...", "new_content": "..." }} }}] }}] }}
 
 ⛔ SYSTEM WILL CRASH IF YOU WRITE:
 ⛔ Any credential messages
@@ -688,13 +728,13 @@ APPLICATION CODE:
 
 🚨 CRITICAL RESPONSE FORMAT 🚨
 
-You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array of Todo objects starting with [ and ending with ].
 
 FOR INCOMPLETE/BROKEN CODE - REJECTION FORMAT:
-❌ [{{ "Reject": {{ "reason": "Missing essential files: Cargo.toml not found", "blocking_issues": ["No build configuration", "Missing main.rs", "No dependencies defined"] }} }}]
+❌ {{ "status": "Reject", "reason": "Missing essential files: Cargo.toml not found", "blocking_issues": ["No build configuration", "Missing main.rs", "No dependencies defined"] }}
 
 FOR WORKING CODE - TESTING FORMAT:
-✅ [{{ "Write": {{ "path": "tests/unit/App.test.js", "content": "..." }} }}]
+✅ {{ "status": "Accept", "data": [{{ "title": "QA Test Implementation", "actions": [{{ "Write": {{ "path": "tests/unit/App.test.js", "content": "..." }} }}] }}] }}
 
 DO NOT WRITE:
 ❌ "I'll create tests for..."
@@ -795,13 +835,13 @@ PROJECT STRUCTURE:
 
 🚨 CRITICAL RESPONSE FORMAT 🚨
 
-You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array of Todo objects starting with [ and ending with ].
 
 FOR NON-DEPLOYABLE CODE - REJECTION FORMAT:
-❌ [{{ "Reject": {{ "reason": "Project doesn't build - missing Cargo.toml", "blocking_issues": ["No build configuration", "Tests failing", "Security vulnerabilities"] }} }}]
+❌ {{ "status": "Reject", "reason": "Project doesn't build - missing Cargo.toml", "blocking_issues": ["No build configuration", "Tests failing", "Security vulnerabilities"] }}
 
 FOR DEPLOYABLE CODE - DEVOPS FORMAT:
-✅ [{{ "Write": {{ "path": ".github/workflows/ci.yml", "content": "..." }} }}]
+✅ {{ "status": "Accept", "data": [{{ "title": "DevOps CI/CD Setup", "actions": [{{ "Write": {{ "path": ".github/workflows/ci.yml", "content": "..." }} }}] }}] }}
 
 DO NOT WRITE:
 ❌ "I'll set up the CI/CD pipeline..."
@@ -894,7 +934,7 @@ DO NOT WRITE:
             28. Include monitoring and alerting setup
             29. Plan for future maintenance and updates
 
-            Return a JSON array of actions to be executed in order (important):
+            Return a JSON array of Todo objects with actions to be executed in order (important):
 
             {}
 
@@ -1037,7 +1077,7 @@ DO NOT WRITE:
             - Use modern build tools (Vite instead of Webpack where applicable)
             - Follow current best practices and avoid deprecated APIs
 
-            Return a JSON array of actions to be executed in order. Each action should be specific and complete:
+            Return a JSON array of Todo objects with actions to be executed in order. Each todo should be specific and complete:
 
             CRITICAL REQUIREMENTS FOR ACTIONS:
             - CreateDirectory: Create any necessary directory structure first
@@ -2337,7 +2377,7 @@ FAILED COMMAND: {}
 
 🚨 CRITICAL RESPONSE FORMAT 🚨
 
-You are in JSON-ONLY mode. Your response MUST be a valid JSON array starting with [ and ending with ].
+You are in JSON-ONLY mode. Your response MUST be a valid JSON array of Todo objects starting with [ and ending with ].
 
 DO NOT WRITE:
 ❌ "The error is caused by..."
@@ -2346,7 +2386,7 @@ DO NOT WRITE:
 ❌ Any error explanations
 
 WRITE ONLY:
-✅ [{{ "Replace": {{ "path": "src/main.ts", "old_content": "...", "new_content": "..." }} }}]
+✅ [{{ "title": "Error Recovery", "actions": [{{ "Replace": {{ "path": "src/main.ts", "old_content": "...", "new_content": "..." }} }}] }}]
 
 {}
             "#,
@@ -2423,7 +2463,7 @@ WRITE ONLY:
             - **Go**: func Test*, testing.T, assert packages
 
             RULES:
-            - MUST RETURN JSON ACTIONS - no text explanations
+            - MUST RETURN JSON TODO OBJECTS - no text explanations
             - Create complete, runnable test files
             - Test all public functions and methods
             - Include setup and teardown when needed
@@ -2431,8 +2471,8 @@ WRITE ONLY:
             - Ensure tests are independent and can run in any order
             - Fix failing tests immediately before proceeding
 
-            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix unit tests.
-            DO NOT return test plans - CREATE ACTIONS to make tests work.
+            CRITICAL: You MUST produce JSON TODO OBJECTS with actions to create/run/fix unit tests.
+            DO NOT return test plans - CREATE TODO OBJECTS with actions to make tests work.
 
             YOUR UNIT TESTING WORKFLOW:
             1. Create actions to write comprehensive test files
@@ -2441,7 +2481,7 @@ WRITE ONLY:
             4. Create actions to verify test coverage
             5. Repeat until all tests pass with good coverage
 
-            Return a JSON array of actions to create/run/fix unit tests:
+            Return a JSON array of Todo objects with actions to create/run/fix unit tests:
 
             {}
 
@@ -2517,15 +2557,15 @@ WRITE ONLY:
             - **Go**: net/http/httptest, database/sql testing
 
             RULES:
-            - MUST RETURN JSON ACTIONS - no text explanations
+            - MUST RETURN JSON TODO OBJECTS - no text explanations
             - Test real component interactions, not mocks
             - Set up proper test databases/environments
             - Clean up test data after each test
             - Test both success and failure scenarios
             - Verify data consistency across operations
 
-            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix integration tests.
-            DO NOT return test strategies - CREATE ACTIONS to make integration tests work.
+            CRITICAL: You MUST produce JSON TODO OBJECTS with actions to create/run/fix integration tests.
+            DO NOT return test strategies - CREATE TODO OBJECTS with actions to make integration tests work.
 
             YOUR INTEGRATION TESTING WORKFLOW:
             1. Create actions to set up test environment and data
@@ -2535,7 +2575,7 @@ WRITE ONLY:
             5. Create actions to clean up test environment
             6. Repeat until all integration tests pass
 
-            Return a JSON array of actions to create/run/fix integration tests:
+            Return a JSON array of Todo objects with actions to create/run/fix integration tests:
 
             {}
 
@@ -2606,15 +2646,15 @@ WRITE ONLY:
             - **Puppeteer**: page.goto(), page.click(), page.type(), page.waitFor()
 
             RULES:
-            - MUST RETURN JSON ACTIONS - no text explanations
+            - MUST RETURN JSON TODO OBJECTS - no text explanations
             - Create realistic user scenarios and test data
             - Use proper selectors (data-testid preferred)
             - Add appropriate waits and assertions
             - Clean up test data after each test
             - Make tests independent and repeatable
 
-            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix E2E tests.
-            DO NOT return test scenarios - CREATE ACTIONS to make E2E tests work.
+            CRITICAL: You MUST produce JSON TODO OBJECTS with actions to create/run/fix E2E tests.
+            DO NOT return test scenarios - CREATE TODO OBJECTS with actions to make E2E tests work.
 
             YOUR E2E TESTING WORKFLOW:
             1. Create actions to set up E2E test environment
@@ -2624,7 +2664,7 @@ WRITE ONLY:
             5. Create actions to generate test reports
             6. Repeat until all E2E tests pass consistently
 
-            Return a JSON array of actions to create/run/fix E2E tests:
+            Return a JSON array of Todo objects with actions to create/run/fix E2E tests:
 
             {}
 
@@ -2713,15 +2753,15 @@ WRITE ONLY:
             - **Page Load Time**: First contentful paint, time to interactive
 
             RULES:
-            - MUST RETURN JSON ACTIONS - no text explanations
+            - MUST RETURN JSON TODO OBJECTS - no text explanations
             - Create realistic load patterns and user scenarios
             - Measure multiple performance metrics
             - Run tests multiple times for consistency
             - Document performance baselines and regressions
             - Fix performance issues immediately when found
 
-            CRITICAL: You MUST produce JSON ACTIONS to create/run/fix performance tests.
-            DO NOT return performance analysis - CREATE ACTIONS to make performance tests work.
+            CRITICAL: You MUST produce JSON TODO OBJECTS with actions to create/run/fix performance tests.
+            DO NOT return performance analysis - CREATE TODO OBJECTS with actions to make performance tests work.
 
             YOUR PERFORMANCE TESTING WORKFLOW:
             1. Create actions to set up performance testing tools
@@ -2731,7 +2771,7 @@ WRITE ONLY:
             5. If targets not met, create actions to optimize performance
             6. Repeat until all performance targets are achieved
 
-            Return a JSON array of actions to create/run/fix performance tests:
+            Return a JSON array of Todo objects with actions to create/run/fix performance tests:
 
             {}
 

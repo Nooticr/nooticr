@@ -5,6 +5,7 @@
 //! and documentation creation.
 
 use crate::error::{Result, OrchestratorError};
+use crate::enums::LLMResponse;
 use tokio::process::Command;
 
 /// Gemini CLI utility functions
@@ -274,43 +275,66 @@ impl GeminiCLI {
     pub fn extract_json_from_response(response: &str) -> Result<String> {
         let response = response.trim();
 
-        // If response starts with ```json, extract the JSON
+        // If response starts with ```json, extract the JSON between code blocks
         if response.starts_with("```json") {
-            let start = response
-                .find('[')
-                .or_else(|| response.find('{'))
-                .ok_or_else(|| OrchestratorError::internal("No JSON found in response"))?;
-            let end = if response[start..].starts_with('[') {
-                response
-                    .rfind(']')
-                    .ok_or_else(|| OrchestratorError::internal("No closing bracket found"))?
-            } else {
-                response
-                    .rfind('}')
-                    .ok_or_else(|| OrchestratorError::internal("No closing brace found"))?
-            };
-            Ok(response[start..=end].to_string())
+            let lines: Vec<&str> = response.lines().collect();
+            let mut json_lines = Vec::new();
+            let mut in_json_block = false;
+            
+            for line in lines {
+                if line.trim().starts_with("```json") {
+                    in_json_block = true;
+                    continue;
+                }
+                if line.trim() == "```" && in_json_block {
+                    break;
+                }
+                if in_json_block {
+                    json_lines.push(line);
+                }
+            }
+            
+            let json_str = json_lines.join("\n");
+            if json_str.trim().is_empty() {
+                return Err(OrchestratorError::internal("No JSON found in markdown block"));
+            }
+            Ok(json_str)
         }
         // If response starts with [ or {, assume it's pure JSON
         else if response.starts_with('[') || response.starts_with('{') {
             Ok(response.to_string())
         }
-        // Try to find JSON in the response
+        // Try to find JSON in the response using balanced bracket/brace matching
         else {
-            let start = response
-                .find('[')
-                .or_else(|| response.find('{'))
-                .ok_or_else(|| OrchestratorError::internal("No JSON found in response"))?;
-            let end = if response[start..].starts_with('[') {
-                response
-                    .rfind(']')
-                    .ok_or_else(|| OrchestratorError::internal("No closing bracket found"))?
-            } else {
-                response
-                    .rfind('}')
-                    .ok_or_else(|| OrchestratorError::internal("No closing brace found"))?
+            let start_bracket = response.find('[');
+            let start_brace = response.find('{');
+            
+            let (start_pos, is_array) = match (start_bracket, start_brace) {
+                (Some(bracket), Some(brace)) => {
+                    if bracket < brace { (bracket, true) } else { (brace, false) }
+                },
+                (Some(bracket), None) => (bracket, true),
+                (None, Some(brace)) => (brace, false),
+                (None, None) => return Err(OrchestratorError::internal("No JSON found in response")),
             };
-            Ok(response[start..=end].to_string())
+            
+            // Find the matching closing bracket/brace
+            let chars: Vec<char> = response.chars().collect();
+            let mut depth = 0;
+            let (open_char, close_char) = if is_array { ('[', ']') } else { ('{', '}') };
+            
+            for i in start_pos..chars.len() {
+                if chars[i] == open_char {
+                    depth += 1;
+                } else if chars[i] == close_char {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(response[start_pos..=i].to_string());
+                    }
+                }
+            }
+            
+            Err(OrchestratorError::internal("No matching closing bracket/brace found"))
         }
     }
 
@@ -349,6 +373,118 @@ impl GeminiCLI {
             .map_err(|e| OrchestratorError::json_parsing("Gemini model info response", e))?;
 
         Ok(json)
+    }
+
+    /// Send a query and parse response into structured LLMResponse enum
+    pub async fn query_structured(prompt: &str) -> Result<LLMResponse> {
+        let response = Self::query(prompt).await?;
+        Self::parse_response(&response)
+    }
+
+    /// Send a query with specific model and parse response into structured LLMResponse enum
+    pub async fn query_structured_with_model(prompt: &str, model: &str) -> Result<LLMResponse> {
+        let response = Self::query_with_model(prompt, model).await?;
+        Self::parse_response(&response)
+    }
+
+    /// Send a query from directory and parse response into structured LLMResponse enum
+    pub async fn query_structured_from_dir(
+        session_id: &str,
+        prompt: &str,
+        model: Option<&str>,
+        working_dir: &std::path::Path,
+    ) -> Result<LLMResponse> {
+        let response = Self::query_with_session_from_dir(session_id, prompt, model, working_dir).await?;
+        Self::parse_response(&response)
+    }
+
+    /// Parse a raw LLM response string into a structured LLMResponse enum
+    pub fn parse_response(response: &str) -> Result<LLMResponse> {
+        // First try to extract JSON if it's wrapped in markdown
+        let json_str = Self::extract_json_from_response(response)?;
+        
+        // Try to parse into structured response types
+        match LLMResponse::from_raw_json(&json_str) {
+            Ok(parsed_response) => Ok(parsed_response),
+            Err(e) => {
+                tracing::warn!("Failed to parse as structured response: {}", e);
+                // Fallback to raw text response
+                Ok(LLMResponse::Text {
+                    content: response.to_string(),
+                })
+            }
+        }
+    }
+
+    /// Get response type from raw response without full parsing
+    pub fn detect_response_type(response: &str) -> &'static str {
+        // Try to extract JSON and detect patterns
+        if let Ok(json_str) = Self::extract_json_from_response(response) {
+            // Check for common patterns in the JSON
+            // Action array detection - look for array with action objects
+            if json_str.starts_with('[') && (
+                json_str.contains("\"Write\"") || 
+                json_str.contains("\"Read\"") || 
+                json_str.contains("\"Delete\"") || 
+                json_str.contains("\"Update\"") ||
+                json_str.contains("\"actions\"")
+            ) {
+                return "action_array";
+            }
+            if json_str.contains("\"Reject\"") && json_str.contains("\"reason\"") {
+                return "agent_rejection";
+            }
+            if json_str.contains("\"tasks\"") && json_str.contains("\"TaskInput\"") {
+                return "idea_breakdown";
+            }
+            if json_str.contains("\"issue_analysis\"") {
+                return "ci_cd_fix";
+            }
+            if json_str.contains("\"deployment_strategy\"") {
+                return "docker_deployment";
+            }
+            if json_str.contains("\"overall_quality_score\"") {
+                return "qa_analysis";
+            }
+            if json_str.contains("\"synchronization_analysis\"") {
+                return "api_synchronization";
+            }
+            if json_str.contains("\"performance_analysis\"") {
+                return "performance_optimization";
+            }
+            return "structured_json";
+        }
+        "text"
+    }
+
+    /// Extract actions from response if present
+    pub async fn extract_actions_from_response(response: &str) -> Result<Vec<crate::enums::Action>> {
+        let llm_response = Self::parse_response(response)?;
+        Ok(llm_response.extract_actions())
+    }
+
+    /// Check if response is a rejection
+    pub fn is_rejection_response(response: &str) -> bool {
+        if let Ok(llm_response) = Self::parse_response(response) {
+            llm_response.is_rejection()
+        } else {
+            // Fallback: check for rejection patterns in raw text
+            response.contains("Reject") || response.contains("rejection") || response.contains("blocking_issues")
+        }
+    }
+
+    /// Get rejection details from response
+    pub fn extract_rejection_details(response: &str) -> Option<(String, Vec<String>)> {
+        if let Ok(llm_response) = Self::parse_response(response) {
+            if let Some(reason) = llm_response.get_rejection_reason() {
+                let blocking_issues = llm_response.get_blocking_issues()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                return Some((reason.to_string(), blocking_issues));
+            }
+        }
+        None
     }
 }
 
@@ -451,5 +587,70 @@ mod tests {
         if let Ok(json_str) = extracted {
             assert_eq!(json_str, json_response);
         }
+    }
+
+    #[test]
+    fn test_response_type_detection() {
+        // Test action array detection
+        let action_response = r#"```json
+[
+  {
+    "Write": {
+      "path": "test.txt",
+      "content": "test"
+    }
+  }
+]
+```"#;
+        assert_eq!(GeminiCLI::detect_response_type(action_response), "action_array");
+
+        // Test rejection detection
+        let rejection_response = r#"```json
+{
+  "Reject": {
+    "reason": "Code doesn't compile",
+    "blocking_issues": ["Syntax errors"]
+  }
+}
+```"#;
+        assert_eq!(GeminiCLI::detect_response_type(rejection_response), "agent_rejection");
+
+        // Test text response
+        let text_response = "This is just plain text without JSON";
+        assert_eq!(GeminiCLI::detect_response_type(text_response), "text");
+    }
+
+    #[test]
+    fn test_structured_response_parsing() {
+        // Test parsing action array
+        let action_response = r#"```json
+[
+  {
+    "Write": {
+      "path": "test.txt",
+      "content": "Hello World"
+    }
+  }
+]
+```"#;
+        
+        let parsed = GeminiCLI::parse_response(action_response);
+        assert!(parsed.is_ok());
+        
+        if let Ok(llm_response) = parsed {
+            assert!(llm_response.has_actions());
+            assert_eq!(llm_response.response_type(), "feature_development");
+            let actions = llm_response.extract_actions();
+            assert_eq!(actions.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_rejection_detection() {
+        let rejection_response = r#"Some text with Reject keyword and blocking_issues"#;
+        assert!(GeminiCLI::is_rejection_response(rejection_response));
+
+        let normal_response = r#"[{"Write": {"path": "test.txt", "content": "test"}}]"#;
+        assert!(!GeminiCLI::is_rejection_response(normal_response));
     }
 }
