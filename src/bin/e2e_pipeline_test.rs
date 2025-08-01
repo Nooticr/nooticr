@@ -8,11 +8,11 @@
 /// All actions are produced by Gemini LLM and must result in a working project.
 /// If not, we'll identify which prompts need tweaking.
 
-use orchy::managers::{McpManager, McpClient, McpModel};
+use orchy::managers::{McpManager, McpClient};
 use orchy::prompts::Prompts;
 use orchy::enums::TechStack;
 use orchy::models::prompt_responses::*;
-use orchy::models::task::{Task, TaskInput};
+use orchy::models::task::TaskInput;
 use orchy::mcp::gemini::GeminiCLI;
 use std::fs;
 use std::path::PathBuf;
@@ -405,7 +405,7 @@ async fn run_idea_breakdown(
     info!("{}", prompt);
     info!("{}", "=".repeat(80));
 
-    match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.0-flash-exp", 3).await {
+    match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.5-flash", 3).await {
         Ok(response_text) => {
             let duration = start_time.elapsed();
 
@@ -500,7 +500,7 @@ async fn run_feature_development(
 
         info!("    📝 Sending prompt to LLM...");
 
-        match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.0-flash-exp", 3).await {
+        match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.5-flash", 3).await {
             Ok(response) => {
                 let duration = start_time.elapsed();
                 info!("    ✅ LLM response received in {:.2}s", duration.as_secs_f64());
@@ -517,19 +517,27 @@ async fn run_feature_development(
                 let mut error_details = String::new();
                 let files_generated = 1; // Assume at least one file was generated if successful
 
+                // Extract JSON from markdown if present
+                let json_content = extract_json_from_response(&response);
+                info!("    🔍 Extracted JSON content: {}", json_content);
+
                 // Change to project directory before executing actions
                 let original_dir = std::env::current_dir()?;
                 std::env::set_current_dir(project_path)?;
 
-                match Action::parse_and_execute(&response).await {
-                    Ok(()) => {
-                        info!("    ✅ Actions executed successfully");
-                        info!("    📄 Actions completed in project directory");
-                    }
-                    Err(e) => {
-                        verification_failed = true;
-                        error_details = format!("Action parsing/execution failed: {}", e);
-                        warn!("    ❌ Action execution failed: {}", e);
+                let actions = Action::from_json_array(&json_content).unwrap();
+
+                for action in actions {
+                    match action.execute().await {
+                        Ok(_) => {
+                            info!("    ✅ Action executed successfully");
+                        }
+                        Err(e) => {
+                            verification_failed = true;
+                            error_details = format!("Action execution failed: {}", e);
+                            warn!("    ❌ Action execution failed: {}", e);
+                            break;
+                        }
                     }
                 }
 
@@ -969,13 +977,46 @@ async fn fix_compilation_errors(
         }
     }
 
-    // Use the proper error recovery prompt from prompts/mod.rs
-    let error_fixing_prompt = orchy::prompts::Prompts::error_recovery_prompt(
-        tech_stack,
-        error_details,
-        "cargo check", // The command that failed
-        &project_files,
-        None, // No recent changes info available
+    // Create a focused error recovery prompt that requires pure JSON (no markdown)
+    let error_fixing_prompt = format!(
+        r#"🚨 CRITICAL: PURE JSON RESPONSE REQUIRED 🚨
+
+TECH STACK: {}
+FAILED COMMAND: cargo check
+
+ERROR DETAILS:
+{}
+
+🎯 TASK: Generate ONLY the minimal JSON actions to fix these specific errors.
+
+⚠️⚠️⚠️ CRITICAL: YOUR RESPONSE MUST BE PURE JSON - NO MARKDOWN ⚠️⚠️⚠️
+
+❌ DO NOT WRITE:
+```json
+[{{"action": "..."}}]
+```
+
+✅ WRITE ONLY:
+[{{"Write": {{"path": "Cargo.toml", "content": "..."}}}}]
+
+🔧 COMMON RUST ERROR FIXES:
+- DEPENDENCY CONFLICTS: Update Cargo.toml with compatible versions
+- MISSING FILES: Create .env, schema files, config files
+- IMPORT ERRORS: Fix module declarations in lib.rs
+- VERSION MISMATCHES: Use compatible dependency versions
+
+🚨 RESPONSE REQUIREMENTS 🚨
+1. START IMMEDIATELY WITH [ (no text before)
+2. END IMMEDIATELY WITH ] (no text after)
+3. NO MARKDOWN CODE BLOCKS
+4. NO EXPLANATIONS
+5. PURE JSON ONLY
+
+EXAMPLE RESPONSE FORMAT:
+[{{"Write": {{"path": "Cargo.toml", "content": "[package]\\nname = \\"todo-api\\"\\nversion = \\"0.1.0\\"\\n\\n[dependencies]\\nactix-web = \\"4.0\\""}}}}]
+
+🚨 FIRST CHARACTER MUST BE [ - LAST CHARACTER MUST BE ] 🚨"#,
+        tech_stack, error_details
     );
 
     info!("📝 Sending focused error-fixing prompt to LLM...");
@@ -984,7 +1025,7 @@ async fn fix_compilation_errors(
 
     // Use direct Gemini CLI call to get raw response and see what LLM is actually sending
     use orchy::mcp::gemini::GeminiCLI;
-    let raw_response = match GeminiCLI::query_with_model_and_retries(&error_fixing_prompt, "gemini-2.0-flash-exp", 2).await {
+    let raw_response = match GeminiCLI::query_with_model_and_retries(&error_fixing_prompt, "gemini-2.5-flash", 2).await {
         Ok(resp) => {
             info!("✅ Raw error-fixing response received successfully");
             info!("🔍 RAW LLM RESPONSE:");
@@ -1002,11 +1043,15 @@ async fn fix_compilation_errors(
     // Use Action::parse_and_execute to handle error recovery actions
     use orchy::enums::action::Action;
 
+    // Extract JSON from markdown if present
+    let json_content = extract_json_from_response(&raw_response);
+    info!("🔍 Error recovery JSON content: {}", json_content);
+
     // Change to project directory before executing actions
     let original_dir = std::env::current_dir()?;
     std::env::set_current_dir(project_path)?;
 
-    match Action::parse_and_execute(&raw_response).await {
+    match Action::parse_and_execute(&json_content).await {
         Ok(()) => {
             info!("🔧 Error recovery actions executed successfully");
             info!("  📄 Error recovery actions completed in project directory");
@@ -1416,7 +1461,7 @@ async fn run_feature_development_with_feedback(
     info!("{}", prompt);
     info!("{}", "=".repeat(80));
 
-    match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.0-flash-exp", 3).await {
+    match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.5-flash", 3).await {
         Ok(response) => {
             let duration = start_time.elapsed();
             info!("    ✅ Feature development with feedback completed in {:.2}s", duration.as_secs_f64());
@@ -1429,11 +1474,15 @@ async fn run_feature_development_with_feedback(
             // Use Action::parse_and_execute to handle the response
             use orchy::enums::action::Action;
 
+            // Extract JSON from markdown if present
+            let json_content = extract_json_from_response(&response);
+            info!("    🔍 Feedback response JSON content: {}", json_content);
+
             // Change to project directory before executing actions
             let original_dir = std::env::current_dir()?;
             std::env::set_current_dir(project_path)?;
 
-            match Action::parse_and_execute(&response).await {
+            match Action::parse_and_execute(&json_content).await {
                 Ok(()) => {
                     info!("    📄 Actions executed successfully with feedback incorporated");
                 }
@@ -1479,7 +1528,7 @@ async fn attempt_error_recovery(
     info!("{}", prompt);
     info!("{}", "=".repeat(80));
 
-    match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.0-flash-exp", 2).await {
+    match GeminiCLI::query_with_model_and_retries(&prompt, "gemini-2.5-flash", 2).await {
         Ok(response) => {
             info!("🤖 ERROR RECOVERY RESPONSE RECEIVED:");
             info!("{}", "=".repeat(80));
@@ -1506,8 +1555,8 @@ async fn attempt_error_recovery(
             }
         }
         Err(e) => {
-            error!("🔧 Error recovery failed: {}", e);
-            Err(Box::new(e))
+            error!("❌ Error recovery failed: {}", e);
+            Err(format!("Error recovery failed: {}", e).into())
         }
     }
 }
