@@ -1,10 +1,50 @@
 use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
 use crate::enums::Action;
 use crate::models::prompt_responses::*;
 use crate::models::code_review::CodeReviewInput;
 use crate::models::conflict_resolution::ConflictResolutionInput;
 use crate::models::task::TaskInput;
 use crate::models::agent_error_recovery::ErrorRecoveryResponse;
+
+/// Represents a single failure instance for a todo
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TodoFailure {
+    /// When the failure occurred
+    pub timestamp: DateTime<Utc>,
+    /// The error message or reason for failure
+    pub error_message: String,
+    /// Optional details about the failure (stack trace, context, etc.)
+    pub details: Option<String>,
+    /// Which action index failed (if applicable)
+    pub failed_action_index: Option<usize>,
+}
+
+impl TodoFailure {
+    /// Creates a new failure record
+    pub fn new(error_message: String) -> Self {
+        Self {
+            timestamp: Utc::now(),
+            error_message,
+            details: None,
+            failed_action_index: None,
+        }
+    }
+    
+    /// Creates a failure with full details
+    pub fn with_details(
+        error_message: String,
+        details: Option<String>,
+        failed_action_index: Option<usize>,
+    ) -> Self {
+        Self {
+            timestamp: Utc::now(),
+            error_message,
+            details,
+            failed_action_index,
+        }
+    }
+}
 
 /// A todo item with a title and a set of actions to perform
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,10 +59,18 @@ pub struct Todo {
     pub priority: Option<String>,
     /// Estimated complexity or effort (Low, Medium, High)
     pub complexity: Option<String>,
+    /// Whether this todo is completed or not
+    pub done: bool,
+    /// Number of times this todo has been retried
+    pub retry_count: u32,
+    /// History of failures for this todo
+    pub failure_history: Vec<TodoFailure>,
+    /// Maximum number of retries allowed (None = unlimited)
+    pub max_retries: Option<u32>,
 }
 
 impl Todo {
-    /// Creates a new todo with title and actions
+    /// Creates a new todo with title and actions (defaults to not done)
     pub fn new(title: String, actions: Vec<Action>) -> Self {
         Self {
             title,
@@ -30,6 +78,10 @@ impl Todo {
             actions,
             priority: None,
             complexity: None,
+            done: false,
+            retry_count: 0,
+            failure_history: Vec::new(),
+            max_retries: None,
         }
     }
     
@@ -40,6 +92,7 @@ impl Todo {
         actions: Vec<Action>,
         priority: Option<String>,
         complexity: Option<String>,
+        done: bool,
     ) -> Self {
         Self {
             title,
@@ -47,6 +100,10 @@ impl Todo {
             actions,
             priority,
             complexity,
+            done,
+            retry_count: 0,
+            failure_history: Vec::new(),
+            max_retries: None,
         }
     }
     
@@ -58,6 +115,117 @@ impl Todo {
     /// Checks if this todo has any actions
     pub fn has_actions(&self) -> bool {
         !self.actions.is_empty()
+    }
+    
+    /// Marks this todo as done
+    pub fn mark_done(&mut self) {
+        self.done = true;
+    }
+    
+    /// Marks this todo as not done
+    pub fn mark_not_done(&mut self) {
+        self.done = false;
+    }
+    
+    /// Checks if this todo is completed
+    pub fn is_done(&self) -> bool {
+        self.done
+    }
+    
+    /// Creates a new todo that is already marked as done
+    pub fn new_done(title: String, actions: Vec<Action>) -> Self {
+        Self {
+            title,
+            description: None,
+            actions,
+            priority: None,
+            complexity: None,
+            done: true,
+            retry_count: 0,
+            failure_history: Vec::new(),
+            max_retries: None,
+        }
+    }
+    
+    /// Creates a new todo with retry limits
+    pub fn with_retry_limit(title: String, actions: Vec<Action>, max_retries: u32) -> Self {
+        Self {
+            title,
+            description: None,
+            actions,
+            priority: None,
+            complexity: None,
+            done: false,
+            retry_count: 0,
+            failure_history: Vec::new(),
+            max_retries: Some(max_retries),
+        }
+    }
+    
+    /// Records a failure and increments retry count
+    pub fn record_failure(&mut self, error_message: String) {
+        let failure = TodoFailure::new(error_message);
+        self.failure_history.push(failure);
+        self.retry_count += 1;
+    }
+    
+    /// Records a failure with detailed information
+    pub fn record_failure_with_details(
+        &mut self,
+        error_message: String,
+        details: Option<String>,
+        failed_action_index: Option<usize>,
+    ) {
+        let failure = TodoFailure::with_details(error_message, details, failed_action_index);
+        self.failure_history.push(failure);
+        self.retry_count += 1;
+    }
+    
+    /// Checks if this todo has reached its retry limit
+    pub fn has_reached_retry_limit(&self) -> bool {
+        if let Some(max) = self.max_retries {
+            self.retry_count >= max
+        } else {
+            false // No limit set
+        }
+    }
+    
+    /// Gets the number of failures recorded
+    pub fn failure_count(&self) -> usize {
+        self.failure_history.len()
+    }
+    
+    /// Gets the most recent failure, if any
+    pub fn last_failure(&self) -> Option<&TodoFailure> {
+        self.failure_history.last()
+    }
+    
+    /// Checks if this todo has any failures
+    pub fn has_failures(&self) -> bool {
+        !self.failure_history.is_empty()
+    }
+    
+    /// Gets the current retry count
+    pub fn get_retry_count(&self) -> u32 {
+        self.retry_count
+    }
+    
+    /// Sets the maximum number of retries allowed
+    pub fn set_max_retries(&mut self, max_retries: Option<u32>) {
+        self.max_retries = max_retries;
+    }
+    
+    /// Resets failure history and retry count (for fresh attempts)
+    pub fn reset_failures(&mut self) {
+        self.failure_history.clear();
+        self.retry_count = 0;
+    }
+    
+    /// Gets all failure messages as a vector of strings
+    pub fn get_failure_messages(&self) -> Vec<String> {
+        self.failure_history.iter()
+            .map(|f| f.error_message.clone())
+            .collect()
     }
 }
 
@@ -587,6 +755,7 @@ mod tests {
         assert_eq!(todo.actions, actions);
         assert_eq!(todo.action_count(), 1);
         assert!(todo.has_actions());
+        assert!(!todo.is_done()); // New todos default to not done
         
         let detailed_todo = Todo::with_details(
             "Detailed Todo".to_string(),
@@ -594,10 +763,147 @@ mod tests {
             actions.clone(),
             Some("High".to_string()),
             Some("Medium".to_string()),
+            true, // Mark as done
         );
         assert_eq!(detailed_todo.title, "Detailed Todo");
         assert_eq!(detailed_todo.description, Some("Description".to_string()));
         assert_eq!(detailed_todo.priority, Some("High".to_string()));
         assert_eq!(detailed_todo.complexity, Some("Medium".to_string()));
+        assert!(detailed_todo.is_done()); // Should be done as specified
+    }
+    
+    #[test]
+    fn test_todo_done_state() {
+        let actions = vec![
+            Action::Write {
+                path: "test.txt".to_string(),
+                content: "test content".to_string(),
+            }
+        ];
+        
+        // Test new todo defaults to not done
+        let mut todo = Todo::new("Test Todo".to_string(), actions.clone());
+        assert!(!todo.is_done());
+        
+        // Test marking as done
+        todo.mark_done();
+        assert!(todo.is_done());
+        
+        // Test marking as not done
+        todo.mark_not_done();
+        assert!(!todo.is_done());
+        
+        // Test new_done constructor
+        let done_todo = Todo::new_done("Done Todo".to_string(), actions);
+        assert!(done_todo.is_done());
+        assert_eq!(done_todo.title, "Done Todo");
+    }
+    
+    #[test]
+    fn test_todo_failure_tracking() {
+        let actions = vec![
+            Action::Write {
+                path: "test.txt".to_string(),
+                content: "test content".to_string(),
+            }
+        ];
+        
+        let mut todo = Todo::new("Test Todo".to_string(), actions);
+        
+        // Test initial state
+        assert_eq!(todo.get_retry_count(), 0);
+        assert_eq!(todo.failure_count(), 0);
+        assert!(!todo.has_failures());
+        assert!(todo.last_failure().is_none());
+        
+        // Test recording a failure
+        todo.record_failure("First error".to_string());
+        assert_eq!(todo.get_retry_count(), 1);
+        assert_eq!(todo.failure_count(), 1);
+        assert!(todo.has_failures());
+        
+        let last_failure = todo.last_failure().unwrap();
+        assert_eq!(last_failure.error_message, "First error");
+        assert!(last_failure.details.is_none());
+        assert!(last_failure.failed_action_index.is_none());
+        
+        // Test recording a failure with details
+        todo.record_failure_with_details(
+            "Second error".to_string(),
+            Some("Stack trace here".to_string()),
+            Some(0),
+        );
+        assert_eq!(todo.get_retry_count(), 2);
+        assert_eq!(todo.failure_count(), 2);
+        
+        let last_failure = todo.last_failure().unwrap();
+        assert_eq!(last_failure.error_message, "Second error");
+        assert_eq!(last_failure.details, Some("Stack trace here".to_string()));
+        assert_eq!(last_failure.failed_action_index, Some(0));
+        
+        // Test getting all failure messages
+        let messages = todo.get_failure_messages();
+        assert_eq!(messages, vec!["First error", "Second error"]);
+        
+        // Test resetting failures
+        todo.reset_failures();
+        assert_eq!(todo.get_retry_count(), 0);
+        assert_eq!(todo.failure_count(), 0);
+        assert!(!todo.has_failures());
+    }
+    
+    #[test]
+    fn test_todo_retry_limits() {
+        let actions = vec![
+            Action::Write {
+                path: "test.txt".to_string(),
+                content: "test content".to_string(),
+            }
+        ];
+        
+        // Test todo with retry limit
+        let mut todo = Todo::with_retry_limit("Limited Todo".to_string(), actions, 2);
+        assert!(!todo.has_reached_retry_limit());
+        
+        // Test first failure
+        todo.record_failure("Error 1".to_string());
+        assert!(!todo.has_reached_retry_limit());
+        assert_eq!(todo.get_retry_count(), 1);
+        
+        // Test second failure - should reach limit
+        todo.record_failure("Error 2".to_string());
+        assert!(todo.has_reached_retry_limit());
+        assert_eq!(todo.get_retry_count(), 2);
+        
+        // Test setting max retries
+        todo.set_max_retries(Some(5));
+        assert!(!todo.has_reached_retry_limit()); // Now under new limit
+        
+        // Test unlimited retries
+        todo.set_max_retries(None);
+        assert!(!todo.has_reached_retry_limit()); // No limit
+    }
+    
+    #[test]
+    fn test_todo_failure_structure() {
+        // Test TodoFailure creation
+        let failure1 = TodoFailure::new("Simple error".to_string());
+        assert_eq!(failure1.error_message, "Simple error");
+        assert!(failure1.details.is_none());
+        assert!(failure1.failed_action_index.is_none());
+        
+        let failure2 = TodoFailure::with_details(
+            "Detailed error".to_string(),
+            Some("More info".to_string()),
+            Some(1),
+        );
+        assert_eq!(failure2.error_message, "Detailed error");
+        assert_eq!(failure2.details, Some("More info".to_string()));
+        assert_eq!(failure2.failed_action_index, Some(1));
+        
+        // Timestamps should be recent (within last minute)
+        let now = Utc::now();
+        let time_diff = now.signed_duration_since(failure1.timestamp);
+        assert!(time_diff.num_seconds() < 60);
     }
 }

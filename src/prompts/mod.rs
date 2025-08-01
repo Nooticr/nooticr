@@ -163,8 +163,10 @@ YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
       {{"RunCommand": {{"command": "cargo check", "env": null}}}}
     ],
     "priority": "High",
-    "complexity": "Low"
+    "complexity": "Low",
+    "done": false
   }},
+  // Note: retry_count, failure_history, and max_retries fields are managed internally
   {{
     "title": "Basic Server Structure",
     "description": "Create main server with Actix-web",
@@ -173,7 +175,8 @@ YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
       {{"RunCommand": {{"command": "cargo check", "env": null}}}}
     ],
     "priority": "High", 
-    "complexity": "Medium"
+    "complexity": "Medium",
+    "done": false
   }},
   {{
     "title": "Database Models & Connection",
@@ -184,7 +187,8 @@ YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
       {{"RunCommand": {{"command": "cargo check", "env": null}}}}
     ],
     "priority": "High",
-    "complexity": "Medium"
+    "complexity": "Medium",
+    "done": false
   }},
   {{
     "title": "User Authentication", 
@@ -194,7 +198,8 @@ YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
       {{"RunCommand": {{"command": "cargo check", "env": null}}}}
     ],
     "priority": "Medium",
-    "complexity": "High"
+    "complexity": "High",
+    "done": false
   }},
   {{
     "title": "API Handlers & Endpoints",
@@ -204,7 +209,8 @@ YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
       {{"RunCommand": {{"command": "cargo check", "env": null}}}}
     ],
     "priority": "High",
-    "complexity": "High"
+    "complexity": "High",
+    "done": false
   }},
   {{
     "title": "Integration Tests",
@@ -214,7 +220,8 @@ YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
       {{"RunCommand": {{"command": "cargo test", "env": null}}}}
     ],
     "priority": "Medium",
-    "complexity": "Medium"
+    "complexity": "Medium",
+    "done": false
   }},
   {{
     "title": "Final Integration & Testing",
@@ -226,7 +233,8 @@ YOU MUST RETURN A JSON ARRAY WITH ALL 7 TODOS (using new Todo structure):
       {{"RunCommand": {{"command": "cargo build", "env": null}}}}
     ],
     "priority": "High",
-    "complexity": "Low"
+    "complexity": "Low",
+    "done": false
   }}
 ]
 
@@ -308,7 +316,7 @@ DO NOT WRITE:
 ❌ Absolute file paths
 
 WRITE ONLY:
-✅ [{{ "title": "Feature Implementation", "actions": [{{ "Write": {{ "path": "src/App.vue", "content": "..." }} }}] }}]
+✅ [{{ "title": "Feature Implementation", "actions": [{{ "Write": {{ "path": "src/App.vue", "content": "..." }} }}], "done": false }}]
             "#,
             agent_context_section,
             objective,
@@ -614,7 +622,7 @@ FOR INCOMPLETE/BROKEN CODE - REJECTION FORMAT:
 ❌ {{ "status": "Reject", "reason": "Code doesn't compile - syntax errors in main.rs", "blocking_issues": ["Missing dependencies", "Syntax errors", "Incomplete implementation"] }}
 
 FOR WORKING CODE - ACCEPTANCE FORMAT:
-✅ {{ "status": "Accept", "data": [{{ "title": "Code Review Fixes", "actions": [{{ "Replace": {{ "path": "src/utils.js", "old_content": "...", "new_content": "..." }} }}] }}] }}
+✅ {{ "status": "Accept", "data": [{{ "title": "Code Review Fixes", "actions": [{{ "Replace": {{ "path": "src/utils.js", "old_content": "...", "new_content": "..." }} }}], "done": false }}] }}
 
 ⛔ SYSTEM WILL CRASH IF YOU WRITE:
 ⛔ Any credential messages
@@ -734,7 +742,7 @@ FOR INCOMPLETE/BROKEN CODE - REJECTION FORMAT:
 ❌ {{ "status": "Reject", "reason": "Missing essential files: Cargo.toml not found", "blocking_issues": ["No build configuration", "Missing main.rs", "No dependencies defined"] }}
 
 FOR WORKING CODE - TESTING FORMAT:
-✅ {{ "status": "Accept", "data": [{{ "title": "QA Test Implementation", "actions": [{{ "Write": {{ "path": "tests/unit/App.test.js", "content": "..." }} }}] }}] }}
+✅ {{ "status": "Accept", "data": [{{ "title": "QA Test Implementation", "actions": [{{ "Write": {{ "path": "tests/unit/App.test.js", "content": "..." }} }}], "done": false }}] }}
 
 DO NOT WRITE:
 ❌ "I'll create tests for..."
@@ -841,7 +849,7 @@ FOR NON-DEPLOYABLE CODE - REJECTION FORMAT:
 ❌ {{ "status": "Reject", "reason": "Project doesn't build - missing Cargo.toml", "blocking_issues": ["No build configuration", "Tests failing", "Security vulnerabilities"] }}
 
 FOR DEPLOYABLE CODE - DEVOPS FORMAT:
-✅ {{ "status": "Accept", "data": [{{ "title": "DevOps CI/CD Setup", "actions": [{{ "Write": {{ "path": ".github/workflows/ci.yml", "content": "..." }} }}] }}] }}
+✅ {{ "status": "Accept", "data": [{{ "title": "DevOps CI/CD Setup", "actions": [{{ "Write": {{ "path": ".github/workflows/ci.yml", "content": "..." }} }}], "done": false }}] }}
 
 DO NOT WRITE:
 ❌ "I'll set up the CI/CD pipeline..."
@@ -2386,7 +2394,7 @@ DO NOT WRITE:
 ❌ Any error explanations
 
 WRITE ONLY:
-✅ [{{ "title": "Error Recovery", "actions": [{{ "Replace": {{ "path": "src/main.ts", "old_content": "...", "new_content": "..." }} }}] }}]
+✅ [{{ "title": "Error Recovery", "actions": [{{ "Replace": {{ "path": "src/main.ts", "old_content": "...", "new_content": "..." }} }}], "done": false }}]
 
 {}
             "#,

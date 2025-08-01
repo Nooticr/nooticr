@@ -104,4 +104,5 @@ pub mod prompts;
 pub mod managers;
 pub mod utils;
 pub mod database;
+pub mod solvers;
 // pub mod e2e_tests; // Temporarily disabled due to compilation errors
