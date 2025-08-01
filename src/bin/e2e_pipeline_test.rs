@@ -14,6 +14,7 @@ use orchy::enums::TechStack;
 use orchy::models::prompt_responses::*;
 use orchy::models::task::TaskInput;
 use orchy::mcp::gemini::GeminiCLI;
+use orchy::utils;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -518,7 +519,7 @@ async fn run_feature_development(
                 let files_generated = 1; // Assume at least one file was generated if successful
 
                 // Extract JSON from markdown if present
-                let json_content = extract_json_from_response(&response);
+                let json_content = utils::extract_json_from_response(&response);
                 info!("    🔍 Extracted JSON content: {}", json_content);
 
                 // Change to project directory before executing actions
@@ -590,38 +591,6 @@ async fn run_feature_development(
                 continue;
             }
         }
-    }
-}
-
-// Removed custom parsing functions - using Action::parse_and_execute instead
-
-// Removed legacy parsing function - using Action::parse_and_execute instead
-
-/// Extract JSON content from markdown code blocks
-fn extract_json_from_response(response: &str) -> String {
-    let lines: Vec<&str> = response.lines().collect();
-    let mut json_content = String::new();
-    let mut in_json_block = false;
-
-    for line in lines {
-        if line.trim().starts_with("```json") {
-            in_json_block = true;
-            continue;
-        }
-        if line.trim() == "```" && in_json_block {
-            break;
-        }
-        if in_json_block {
-            json_content.push_str(line);
-            json_content.push('\n');
-        }
-    }
-
-    // If no JSON block found, try the entire response
-    if json_content.trim().is_empty() {
-        response.to_string()
-    } else {
-        json_content
     }
 }
 
@@ -1044,7 +1013,7 @@ EXAMPLE RESPONSE FORMAT:
     use orchy::enums::action::Action;
 
     // Extract JSON from markdown if present
-    let json_content = extract_json_from_response(&raw_response);
+    let json_content = utils::extract_json_from_response(&raw_response);
     info!("🔍 Error recovery JSON content: {}", json_content);
 
     // Change to project directory before executing actions
@@ -1052,7 +1021,7 @@ EXAMPLE RESPONSE FORMAT:
     std::env::set_current_dir(project_path)?;
 
     match Action::parse_and_execute(&json_content).await {
-        Ok(()) => {
+        Ok(_results) => {
             info!("🔧 Error recovery actions executed successfully");
             info!("  📄 Error recovery actions completed in project directory");
         }
@@ -1475,7 +1444,7 @@ async fn run_feature_development_with_feedback(
             use orchy::enums::action::Action;
 
             // Extract JSON from markdown if present
-            let json_content = extract_json_from_response(&response);
+            let json_content = utils::extract_json_from_response(&response);
             info!("    🔍 Feedback response JSON content: {}", json_content);
 
             // Change to project directory before executing actions
@@ -1483,7 +1452,7 @@ async fn run_feature_development_with_feedback(
             std::env::set_current_dir(project_path)?;
 
             match Action::parse_and_execute(&json_content).await {
-                Ok(()) => {
+                Ok(_results) => {
                     info!("    📄 Actions executed successfully with feedback incorporated");
                 }
                 Err(e) => {
@@ -1543,7 +1512,7 @@ async fn attempt_error_recovery(
             std::env::set_current_dir(project_path)?;
 
             match Action::parse_and_execute(&response).await {
-                Ok(()) => {
+                Ok(_results) => {
                     info!("🔧 Error recovery actions executed successfully");
                     std::env::set_current_dir(original_dir)?;
                     Ok(vec![]) // Return empty files list since actions were executed

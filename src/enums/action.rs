@@ -9,6 +9,127 @@ use std::pin::Pin;
 use std::future::Future;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActionResult {
+    /// No result (for actions like Write, Delete, etc.)
+    None,
+    /// Text content result (for Read, Grep results)
+    Text(String),
+    /// Directory listing result
+    DirectoryListing {
+        path: String,
+        entries: Vec<DirectoryEntry>,
+    },
+    /// Command execution result
+    CommandOutput {
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
+    },
+    /// File watch result
+    WatchResult {
+        path: String,
+        changes_detected: Vec<String>,
+    },
+    /// Grep search results
+    GrepResults {
+        pattern: String,
+        matches: Vec<GrepMatch>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub path: String,
+    pub is_directory: bool,
+    pub size: u64,
+    pub modified: Option<String>, // ISO 8601 formatted timestamp
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrepMatch {
+    pub file_path: String,
+    pub line_number: usize,
+    pub line_content: String,
+    pub match_start: usize,
+    pub match_end: usize,
+}
+
+impl ActionResult {
+    /// Returns true if this result contains meaningful data for LLM consumption
+    pub fn has_content(&self) -> bool {
+        !matches!(self, ActionResult::None)
+    }
+
+    /// Converts the result to an LLM-readable string representation
+    pub fn to_llm_string(&self) -> String {
+        match self {
+            ActionResult::None => String::new(),
+            ActionResult::Text(content) => content.clone(),
+            ActionResult::DirectoryListing { path, entries } => {
+                let mut result = format!("Directory listing for '{}':\n", path);
+                for entry in entries {
+                    let file_type = if entry.is_directory { "[DIR]" } else { "[FILE]" };
+                    let size_info = if entry.is_directory { 
+                        String::new() 
+                    } else { 
+                        format!(" ({} bytes)", entry.size) 
+                    };
+                    let modified_info = entry.modified
+                        .as_ref()
+                        .map(|m| format!(" - Modified: {}", m))
+                        .unwrap_or_default();
+                    result.push_str(&format!(
+                        "  {} {}{}{}\n", 
+                        file_type, entry.name, size_info, modified_info
+                    ));
+                }
+                result
+            },
+            ActionResult::CommandOutput { stdout, stderr, exit_code } => {
+                let mut result = format!("Command completed with exit code: {}\n", exit_code);
+                if !stdout.is_empty() {
+                    result.push_str(&format!("STDOUT:\n{}\n", stdout));
+                }
+                if !stderr.is_empty() {
+                    result.push_str(&format!("STDERR:\n{}\n", stderr));
+                }
+                result
+            },
+            ActionResult::WatchResult { path, changes_detected } => {
+                let mut result = format!("Watch result for '{}':\n", path);
+                if changes_detected.is_empty() {
+                    result.push_str("  No changes detected\n");
+                } else {
+                    result.push_str("  Changes detected:\n");
+                    for change in changes_detected {
+                        result.push_str(&format!("    - {}\n", change));
+                    }
+                }
+                result
+            },
+            ActionResult::GrepResults { pattern, matches } => {
+                let mut result = format!("Grep results for pattern '{}':\n", pattern);
+                if matches.is_empty() {
+                    result.push_str("  No matches found\n");
+                } else {
+                    result.push_str(&format!("  Found {} match(es):\n", matches.len()));
+                    for grep_match in matches {
+                        result.push_str(&format!(
+                            "    {}:{}  {}\n",
+                            grep_match.file_path,
+                            grep_match.line_number,
+                            grep_match.line_content.trim()
+                        ));
+                    }
+                }
+                result
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Action {
     Write {
         path: String,
@@ -140,65 +261,76 @@ impl Action {
     ///
     /// This is a convenience function for processing prompt outputs.
     /// It combines `from_json_array` and `execute_batch` into a single call.
+    /// Returns results from actions that produce meaningful output.
     ///
     /// # Example
     /// ```rust,no_run
     /// use orchy::enums::Action;
     ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn example() -> Result<Vec<ActionResult>, Box<dyn std::error::Error>> {
     /// let json_output = r#"[
     ///     {
     ///         "Write": {
     ///             "path": "hello.txt",
     ///             "content": "Hello, World!"
     ///         }
+    ///     },
+    ///     {
+    ///         "Read": {
+    ///             "path": "hello.txt"
+    ///         }
     ///     }
     /// ]"#;
     ///
-    /// Action::parse_and_execute(json_output).await?;
-    /// # Ok(())
+    /// let results = Action::parse_and_execute(json_output).await?;
+    /// # Ok(results)
     /// # }
     /// ```
-    pub async fn parse_and_execute(json_str: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn parse_and_execute(json_str: &str) -> Result<Vec<ActionResult>, Box<dyn std::error::Error>> {
         let actions = Self::from_json_array(json_str)?;
-        Self::execute_batch(&actions).await?;
-        Ok(())
+        let results = Self::execute_batch(&actions).await?;
+        Ok(results)
     }
 
     /// Execute a batch of actions sequentially
     ///
     /// All actions are executed in the order they appear in the slice.
     /// If any action fails, execution stops and the error is returned.
+    /// Returns a vector of results for actions that produce meaningful output.
     ///
     /// # Example
     /// ```rust,no_run
     /// use orchy::enums::Action;
     ///
-    /// # async fn example() -> Result<(), std::io::Error> {
+    /// # async fn example() -> Result<Vec<ActionResult>, std::io::Error> {
     /// let actions = vec![
     ///     Action::Write {
     ///         path: "file1.txt".to_string(),
     ///         content: "Content 1".to_string(),
     ///     },
-    ///     Action::Write {
-    ///         path: "file2.txt".to_string(),
-    ///         content: "Content 2".to_string(),
+    ///     Action::Read {
+    ///         path: "file1.txt".to_string(),
     ///     },
     /// ];
     ///
-    /// Action::execute_batch(&actions).await?;
-    /// # Ok(())
+    /// let results = Action::execute_batch(&actions).await?;
+    /// # Ok(results)
     /// # }
     /// ```
-    pub async fn execute_batch(actions: &[Action]) -> Result<(), std::io::Error> {
+    pub async fn execute_batch(actions: &[Action]) -> Result<Vec<ActionResult>, std::io::Error> {
         use tracing::debug;
         debug!("🚀 Starting batch execution of {} actions", actions.len());
+        
+        let mut results = Vec::new();
         
         for (index, action) in actions.iter().enumerate() {
             debug!("⚡ Executing action {}/{}: {:?}", index + 1, actions.len(), action);
             match action.execute().await {
-                Ok(_) => {
+                Ok(result) => {
                     debug!("✅ Action {}/{} completed successfully", index + 1, actions.len());
+                    if result.has_content() {
+                        results.push(result);
+                    }
                 }
                 Err(e) => {
                     debug!("❌ Action {}/{} failed: {}", index + 1, actions.len(), e);
@@ -207,10 +339,10 @@ impl Action {
             }
         }
         debug!("🎉 Batch execution completed successfully");
-        Ok(())
+        Ok(results)
     }
 
-    pub async fn execute(&self) -> Result<(), std::io::Error> {
+    pub async fn execute(&self) -> Result<ActionResult, std::io::Error> {
         match self {
             Action::Write { path, content } => {
                 use tracing::debug;
@@ -239,18 +371,22 @@ impl Action {
                 } else {
                     debug!("⚠️  File verification: '{}' does not exist after write!", path);
                 }
+                
+                return Ok(ActionResult::None);
             }
 
             Action::Read { path } => {
                 let file_path = PathBuf::from(path);
                 let content = fs::read_to_string(&file_path).await?;
                 debug!("Read from {}: {}", path, content);
+                return Ok(ActionResult::Text(content));
             }
 
             Action::Delete { path } => {
                 let file_path = PathBuf::from(path);
                 fs::remove_file(&file_path).await?;
                 debug!("Deleted {}", path);
+                return Ok(ActionResult::None);
             }
 
             Action::Update { path, content } => {
@@ -258,6 +394,7 @@ impl Action {
                 let mut file = fs::File::create(&file_path).await?;
                 file.write_all(content.as_bytes()).await?;
                 debug!("Updated {}", path);
+                return Ok(ActionResult::None);
             }
 
             Action::Replace {
@@ -270,6 +407,7 @@ impl Action {
                 let updated_content = content.replace(old_content, new_content);
                 fs::write(&file_path, updated_content).await?;
                 debug!("Replaced content in {}", path);
+                return Ok(ActionResult::None);
             }
 
             Action::Move { old_path, new_path } => {
@@ -277,6 +415,7 @@ impl Action {
                 let new_file_path = PathBuf::from(new_path);
                 fs::rename(&old_file_path, &new_file_path).await?;
                 debug!("Moved {} to {}", old_path, new_path);
+                return Ok(ActionResult::None);
             }
 
             Action::Copy { old_path, new_path } => {
@@ -285,6 +424,7 @@ impl Action {
                 let content = fs::read(&old_file_path).await?;
                 fs::write(&new_file_path, content).await?;
                 debug!("Copied {} to {}", old_path, new_path);
+                return Ok(ActionResult::None);
             }
 
             Action::RunCommand { command, env } => {
@@ -293,12 +433,20 @@ impl Action {
                     .arg("-c")
                     .arg(command)
                     .envs(environment)
-                    .stdin(std::process::Stdio::inherit())
-                    .stdout(std::process::Stdio::inherit())
-                    .stderr(std::process::Stdio::inherit())
                     .output()
                     .await?;
+                
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let exit_code = output.status.code().unwrap_or(-1);
+                
                 debug!("Ran command `{}` with status {}", command, output.status);
+                
+                return Ok(ActionResult::CommandOutput {
+                    stdout,
+                    stderr,
+                    exit_code,
+                });
             }
 
             Action::Grep { pattern, path, recursive, case_sensitive } => {
@@ -308,17 +456,23 @@ impl Action {
                     Regex::new(&format!("(?i){}", pattern)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
                 };
 
-                if *recursive {
-                    Self::grep_recursive(&regex, path).await?;
+                let matches = if *recursive {
+                    Self::grep_recursive_collect(&regex, path).await?
                 } else {
-                    Self::grep_file(&regex, path).await?;
-                }
+                    Self::grep_file_collect(&regex, path).await?
+                };
+                
+                return Ok(ActionResult::GrepResults {
+                    pattern: pattern.clone(),
+                    matches,
+                });
             }
 
             Action::CreateDirectory { path } => {
                 let dir_path = PathBuf::from(path);
                 fs::create_dir_all(&dir_path).await?;
                 debug!("Created directory {}", path);
+                return Ok(ActionResult::None);
             }
 
             Action::RemoveDirectory { path, recursive } => {
@@ -329,14 +483,20 @@ impl Action {
                     fs::remove_dir(&dir_path).await?;
                 }
                 debug!("Removed directory {}", path);
+                return Ok(ActionResult::None);
             }
 
             Action::ListDirectory { path, recursive } => {
-                if *recursive {
-                    Self::list_directory_recursive(path).await?;
+                let entries = if *recursive {
+                    Self::list_directory_recursive_collect(path).await?
                 } else {
-                    Self::list_directory(path).await?;
-                }
+                    Self::list_directory_collect(path).await?
+                };
+                
+                return Ok(ActionResult::DirectoryListing {
+                    path: path.clone(),
+                    entries,
+                });
             }
 
             Action::CreateSymlink { target, link_path } => {
@@ -353,6 +513,7 @@ impl Action {
                         "Symlinks not supported on this platform"
                     ));
                 }
+                return Ok(ActionResult::None);
             }
 
             Action::SetPermissions { path, permissions } => {
@@ -371,6 +532,7 @@ impl Action {
                 {
                     debug!("Permission setting not supported on this platform");
                 }
+                return Ok(ActionResult::None);
             }
 
             Action::Append { path, content } => {
@@ -383,6 +545,7 @@ impl Action {
                 file.write_all(content.as_bytes()).await?;
                 file.flush().await?;
                 debug!("Appended to {}", path);
+                return Ok(ActionResult::None);
             }
 
             Action::Backup { path, backup_suffix } => {
@@ -392,6 +555,7 @@ impl Action {
                 let content = fs::read(&file_path).await?;
                 fs::write(&backup_path, content).await?;
                 debug!("Created backup {} -> {}", path, backup_path);
+                return Ok(ActionResult::None);
             }
 
             Action::Download { url, destination } => {
@@ -411,6 +575,7 @@ impl Action {
                     ));
                 }
                 debug!("Downloaded {} to {}", url, destination);
+                return Ok(ActionResult::None);
             }
 
             Action::Extract { archive_path, destination } => {
@@ -447,6 +612,7 @@ impl Action {
                     ));
                 }
                 debug!("Extracted {} to {}", archive_path, destination);
+                return Ok(ActionResult::None);
             }
 
             Action::Archive { source_paths, archive_path, format } => {
@@ -474,6 +640,7 @@ impl Action {
                     ));
                 }
                 debug!("Created archive {} from {:?}", archive_path, source_paths);
+                return Ok(ActionResult::None);
             }
 
             Action::Watch { path, duration_seconds } => {
@@ -484,6 +651,7 @@ impl Action {
 
                 let file_path = PathBuf::from(path);
                 let initial_metadata = fs::metadata(&file_path).await.ok();
+                let mut changes_detected = Vec::new();
 
                 while start_time.elapsed() < duration {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -492,15 +660,21 @@ impl Action {
                         if let Some(ref initial) = initial_metadata {
                             if current_metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
                                 != initial.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH) {
-                                debug!("File {} was modified", path);
+                                let change_msg = format!("File {} was modified at {:?}", path, current_metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH));
+                                debug!("{}", change_msg);
+                                changes_detected.push(change_msg);
                             }
                         }
                     }
                 }
                 debug!("Finished watching {}", path);
+                
+                return Ok(ActionResult::WatchResult {
+                    path: path.clone(),
+                    changes_detected,
+                });
             }
         }
-        Ok(())
     }
 
     // Helper methods for new actions
@@ -512,6 +686,25 @@ impl Action {
             }
         }
         Ok(())
+    }
+
+    async fn grep_file_collect(regex: &Regex, path: &str) -> Result<Vec<GrepMatch>, std::io::Error> {
+        let content = fs::read_to_string(path).await?;
+        let mut matches = Vec::new();
+        
+        for (line_num, line) in content.lines().enumerate() {
+            if let Some(mat) = regex.find(line) {
+                matches.push(GrepMatch {
+                    file_path: path.to_string(),
+                    line_number: line_num + 1,
+                    line_content: line.to_string(),
+                    match_start: mat.start(),
+                    match_end: mat.end(),
+                });
+                debug!("{}:{}: {}", path, line_num + 1, line);
+            }
+        }
+        Ok(matches)
     }
 
     fn grep_recursive<'a>(regex: &'a Regex, path: &'a str) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + 'a>> {
@@ -538,6 +731,35 @@ impl Action {
         })
     }
 
+    fn grep_recursive_collect<'a>(regex: &'a Regex, path: &'a str) -> Pin<Box<dyn Future<Output = Result<Vec<GrepMatch>, std::io::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut all_matches = Vec::new();
+            let path_buf = PathBuf::from(path);
+            
+            if path_buf.is_file() {
+                let matches = Self::grep_file_collect(regex, path).await?;
+                all_matches.extend(matches);
+            } else if path_buf.is_dir() {
+                let mut entries = fs::read_dir(&path_buf).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let entry_path = entry.path();
+                    if entry_path.is_file() {
+                        if let Some(path_str) = entry_path.to_str() {
+                            let matches = Self::grep_file_collect(regex, path_str).await?;
+                            all_matches.extend(matches);
+                        }
+                    } else if entry_path.is_dir() {
+                        if let Some(path_str) = entry_path.to_str() {
+                            let matches = Self::grep_recursive_collect(regex, path_str).await?;
+                            all_matches.extend(matches);
+                        }
+                    }
+                }
+            }
+            Ok(all_matches)
+        })
+    }
+
     async fn list_directory(path: &str) -> Result<(), std::io::Error> {
         let mut entries = fs::read_dir(path).await?;
         while let Some(entry) = entries.next_entry().await? {
@@ -553,6 +775,54 @@ impl Action {
             debug!("{} {} {} bytes", file_type, file_name, size);
         }
         Ok(())
+    }
+
+    async fn list_directory_collect(path: &str) -> Result<Vec<DirectoryEntry>, std::io::Error> {
+        let mut directory_entries = Vec::new();
+        let mut entries = fs::read_dir(path).await?;
+        
+        while let Some(entry) = entries.next_entry().await? {
+            let entry_path = entry.path();
+            let file_name = entry_path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("?")
+                .to_string();
+
+            let metadata = entry.metadata().await?;
+            let is_directory = metadata.is_dir();
+            let size = metadata.len();
+            let modified = metadata.modified()
+                .ok()
+                .and_then(|time| {
+                    use std::time::SystemTime;
+                    time.duration_since(SystemTime::UNIX_EPOCH)
+                        .ok()
+                        .map(|duration| {
+                            let secs = duration.as_secs();
+                            // Simple ISO 8601 format
+                            format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                                1970 + secs / 31536000, // approximate year
+                                1 + (secs % 31536000) / 2628000, // approximate month
+                                1 + (secs % 2628000) / 86400, // approximate day
+                                (secs % 86400) / 3600, // hours
+                                (secs % 3600) / 60, // minutes
+                                secs % 60 // seconds
+                            )
+                        })
+                });
+
+            let file_type = if is_directory { "d" } else { "f" };
+            debug!("{} {} {} bytes", file_type, file_name, size);
+
+            directory_entries.push(DirectoryEntry {
+                name: file_name,
+                path: entry_path.to_string_lossy().to_string(),
+                is_directory,
+                size,
+                modified,
+            });
+        }
+        Ok(directory_entries)
     }
 
     async fn list_directory_recursive(path: &str) -> Result<(), std::io::Error> {
@@ -583,6 +853,67 @@ impl Action {
             Ok(())
         })
     }
+
+    async fn list_directory_recursive_collect(path: &str) -> Result<Vec<DirectoryEntry>, std::io::Error> {
+        Self::list_directory_recursive_collect_impl(path).await
+    }
+
+    fn list_directory_recursive_collect_impl<'a>(path: &'a str) -> Pin<Box<dyn Future<Output = Result<Vec<DirectoryEntry>, std::io::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut all_entries = Vec::new();
+            let mut entries = fs::read_dir(path).await?;
+
+            while let Some(entry) = entries.next_entry().await? {
+                let entry_path = entry.path();
+                let file_name = entry_path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("?")
+                    .to_string();
+
+                let metadata = entry.metadata().await?;
+                let is_directory = metadata.is_dir();
+                let size = metadata.len();
+                let modified = metadata.modified()
+                    .ok()
+                    .and_then(|time| {
+                        use std::time::SystemTime;
+                        time.duration_since(SystemTime::UNIX_EPOCH)
+                            .ok()
+                            .map(|duration| {
+                                let secs = duration.as_secs();
+                                // Simple ISO 8601 format
+                                format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                                    1970 + secs / 31536000, // approximate year
+                                    1 + (secs % 31536000) / 2628000, // approximate month
+                                    1 + (secs % 2628000) / 86400, // approximate day
+                                    (secs % 86400) / 3600, // hours
+                                    (secs % 3600) / 60, // minutes
+                                    secs % 60 // seconds
+                                )
+                            })
+                    });
+
+                all_entries.push(DirectoryEntry {
+                    name: file_name.clone(),
+                    path: entry_path.to_string_lossy().to_string(),
+                    is_directory,
+                    size,
+                    modified,
+                });
+
+                if is_directory {
+                    debug!("d {}/", file_name);
+                    if let Some(path_str) = entry_path.to_str() {
+                        let sub_entries = Self::list_directory_recursive_collect_impl(path_str).await?;
+                        all_entries.extend(sub_entries);
+                    }
+                } else {
+                    debug!("f {} ({} bytes)", file_name, size);
+                }
+            }
+            Ok(all_entries)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -601,7 +932,8 @@ mod tests {
             content: "Hello, World!".to_string(),
         };
 
-        action.execute().await.expect("Write action should succeed");
+        let result = action.execute().await.expect("Write action should succeed");
+        assert_eq!(result, ActionResult::None);
 
         assert!(file_path.exists());
         let content = fs::read_to_string(&file_path)
@@ -624,8 +956,15 @@ mod tests {
             path: file_path.to_string_lossy().to_string(),
         };
 
-        // Read action doesn't return content, it just logs it
-        action.execute().await.expect("Read action should succeed");
+        // Read action now returns content
+        let result = action.execute().await.expect("Read action should succeed");
+        
+        match result {
+            ActionResult::Text(content) => {
+                assert_eq!(content, "Test content");
+            }
+            _ => panic!("Expected Text result from Read action"),
+        }
 
         // Verify the file still exists and has the expected content
         let content = fs::read_to_string(&file_path)
@@ -649,10 +988,11 @@ mod tests {
             path: file_path.to_string_lossy().to_string(),
         };
 
-        action
+        let result = action
             .execute()
             .await
             .expect("Delete action should succeed");
+        assert_eq!(result, ActionResult::None);
         assert!(!file_path.exists());
     }
 
@@ -666,10 +1006,11 @@ mod tests {
             content: "Updated content".to_string(),
         };
 
-        action
+        let result = action
             .execute()
             .await
             .expect("Update action should succeed");
+        assert_eq!(result, ActionResult::None);
 
         let content = fs::read_to_string(&file_path)
             .await
@@ -693,10 +1034,11 @@ mod tests {
             new_content: "Goodbye".to_string(),
         };
 
-        action
+        let result = action
             .execute()
             .await
             .expect("Replace action should succeed");
+        assert_eq!(result, ActionResult::None);
 
         let content = fs::read_to_string(&file_path)
             .await
@@ -721,7 +1063,8 @@ mod tests {
             new_path: new_path.to_string_lossy().to_string(),
         };
 
-        action.execute().await.expect("Move action should succeed");
+        let result = action.execute().await.expect("Move action should succeed");
+        assert_eq!(result, ActionResult::None);
 
         assert!(!old_path.exists());
         assert!(new_path.exists());
@@ -748,7 +1091,8 @@ mod tests {
             new_path: dest_path.to_string_lossy().to_string(),
         };
 
-        action.execute().await.expect("Copy action should succeed");
+        let result = action.execute().await.expect("Copy action should succeed");
+        assert_eq!(result, ActionResult::None);
 
         assert!(source_path.exists());
         assert!(dest_path.exists());
@@ -770,10 +1114,18 @@ mod tests {
             env: None,
         };
 
-        action
+        let result = action
             .execute()
             .await
             .expect("Command should execute successfully");
+            
+        match result {
+            ActionResult::CommandOutput { stdout, stderr: _, exit_code } => {
+                assert_eq!(exit_code, 0);
+                assert!(stdout.contains("Hello, World!"));
+            }
+            _ => panic!("Expected CommandOutput result from RunCommand action"),
+        }
     }
 
     #[tokio::test]
@@ -785,10 +1137,18 @@ mod tests {
             env: Some(env_vars),
         };
 
-        action
+        let result = action
             .execute()
             .await
             .expect("Command with env should execute successfully");
+            
+        match result {
+            ActionResult::CommandOutput { stdout, stderr: _, exit_code } => {
+                assert_eq!(exit_code, 0);
+                assert!(stdout.contains("test_value"));
+            }
+            _ => panic!("Expected CommandOutput result from RunCommand action"),
+        }
     }
 
     #[tokio::test]
@@ -807,10 +1167,11 @@ mod tests {
             new_content: "Replacement".to_string(),
         };
 
-        action
+        let result = action
             .execute()
             .await
             .expect("Replace action should succeed even with no matches");
+        assert_eq!(result, ActionResult::None);
 
         let content = fs::read_to_string(&file_path)
             .await
@@ -832,7 +1193,8 @@ mod tests {
             content: "Nested file content".to_string(),
         };
 
-        action.execute().await.expect("Write action should succeed");
+        let result = action.execute().await.expect("Write action should succeed");
+        assert_eq!(result, ActionResult::None);
 
         assert!(nested_path.exists());
         let content = fs::read_to_string(&nested_path)
@@ -1000,9 +1362,12 @@ mod tests {
             },
         ];
 
-        Action::execute_batch(&actions)
+        let results = Action::execute_batch(&actions)
             .await
             .expect("Batch execution should succeed");
+        
+        // Both actions return None, so results should be empty
+        assert_eq!(results.len(), 0);
 
         // Verify both files were created
         assert!(file1_path.exists());
@@ -1036,9 +1401,12 @@ mod tests {
             file_path.to_string_lossy()
         );
 
-        Action::parse_and_execute(&json_str)
+        let results = Action::parse_and_execute(&json_str)
             .await
             .expect("Parse and execute should succeed");
+        
+        // Write action returns None, so results should be empty
+        assert_eq!(results.len(), 0);
 
         // Verify the file was created
         assert!(file_path.exists());
