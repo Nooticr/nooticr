@@ -1,31 +1,43 @@
-# Orchyn
+# Nooticr
 
-**End-to-end marketing harness for products — short-form video scheduling & native social automation.**
+**Social intelligence for AI assistants — read, monitor, and create across ten social networks.**
 
-[orchyn.com](https://orchyn.com) is a Vue + Rust influencer/marketing platform: compose short-form video, schedule it, and publish natively to TikTok, Instagram, YouTube, and more — with AI help for hooks, images, and variants, plus a fleet of AI/real creators, pipeline/calendar, inbox, analytics, and workspace billing.
+[nooticr.com](https://nooticr.com) gives an AI assistant three things: it can
+**read** real social posts across ten networks (TikTok, Instagram, YouTube, X,
+Reddit, LinkedIn, Douyin, Xiaohongshu, Weibo, Bilibili), **monitor** every
+mention of a brand — including what's said out loud on video, not just typed
+— and **create** from what it learned: hooks, variants to film, a scored
+draft, a repurposed thread. The intelligence layer is a real MCP server any
+AI assistant can connect to directly; a full dashboard on top of it composes,
+schedules and publishes short-form video natively for teams running a
+content pipeline.
 
-## Who it’s for
+## Who it's for
 
-App builders, creators, and agencies who need organic distribution without per-channel agency overhead — a modern alternative to tools like Hootsuite and Buffer, built around product video rather than generic social calendars.
+Anyone whose AI assistant needs to actually see social media rather than
+guess at it — creators and marketers who want their assistant to read what's
+working, watch for brand mentions across the internet, and help write the
+next thing, plus teams who want that same intelligence feeding a real
+publishing pipeline.
 
 ## What you can do
 
-- **Compose** — CapCut-style timeline: captions, method-style reels, stickers, and AI (Gemini) for hooks, images, and variants
-- **Schedule** — plan releases from one pipeline/calendar across products and creators
-- **Publish natively** — direct OAuth posting to TikTok, Instagram, YouTube Shorts, and other socials (no copy-paste ops)
-- **Run a creator fleet** — manage AI and real creators, isolated portals, and collaboration in one workspace
-- **Operate the loop** — inbox for approvals and failed publishes, analytics, and billing/workspace controls
+- **Read** — posts, creators, trends, comments, transcripts and video frames
+  across ten networks
+- **Monitor** — every mention of a brand or term, across networks and spoken
+  word, inside a date window you choose
+- **Create** — hooks, variants, scored drafts, repurposed copy, grounded in
+  what actually worked, not invented
+- **Publish** — compose, schedule and post natively to TikTok, Instagram and
+  YouTube Shorts, for teams running a real pipeline
 
-## Product & privacy
+## Public
 
-- Live product: **[orchyn.com](https://orchyn.com)**
-- Privacy: **[orchyn.com/privacy](https://orchyn.com/privacy)**
+- **[nooticr-mcp](https://github.com/Nooticr/nooticr-mcp)** — the MCP server:
+  read the tool list, install it in Claude, Cursor, or any MCP client
+- Live product: **[nooticr.com](https://nooticr.com)**
+- MCP endpoint: **[mcp.nooticr.com](https://mcp.nooticr.com)**
+- Privacy: **[mcp.nooticr.com/privacy](https://mcp.nooticr.com/privacy)**
 
-## Source code
-
-Application source lives in **private** repositories under [orchynX](https://github.com/orchynX). This public repo is a product showcase and pointer to the live product — not the application codebase.
-
-## Links
-
-- Website: [orchyn.com](https://orchyn.com)
-- Org: [github.com/orchynX](https://github.com/orchynX)
+Application and backend source stays private — this repo is a product
+showcase and pointer to the live product, not the application codebase.
